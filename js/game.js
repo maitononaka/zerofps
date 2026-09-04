@@ -1,514 +1,442 @@
 import * as THREE from 'three';
-import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { state, go } from '../ui.js';
+
+const V3 = new THREE.Vector3();
+const V3B = new THREE.Vector3();
+const UP = new THREE.Vector3(0,1,0);
+const TMP_M = new THREE.Matrix4();
+
+const WEAPONS = {
+  primary: {
+    'M4A1': {mag:30, rate:.105, damage:34, reload:1.35, color:0x171b1c},
+    'AKM': {mag:30, rate:.13, damage:40, reload:1.55, color:0x241e18},
+    'SMG45': {mag:32, rate:.085, damage:27, reload:1.15, color:0x1a2023}
+  },
+  secondary: {
+    'P320': {mag:17, rate:.19, damage:30, reload:1.1, color:0x202527},
+    'G18': {mag:20, rate:.105, damage:24, reload:1.25, color:0x202427}
+  },
+  melee: {'タクティカルナイフ':{}, 'バタフライナイフ':{}, '拳':{}}
+};
 
 export class ZeroDivisionGame{
   constructor(){
     this.scene=new THREE.Scene();
-    this.camera=new THREE.PerspectiveCamera(78,innerWidth/innerHeight,.05,500);
-    this.camera.position.set(0,1.72,6);
+    this.camera=new THREE.PerspectiveCamera(78,innerWidth/innerHeight,.05,700);
     this.renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
     this.renderer.setSize(innerWidth,innerHeight);
-    this.renderer.domElement.style.position='fixed';
-    this.renderer.domElement.style.left='0';
-    this.renderer.domElement.style.top='0';
-    this.renderer.domElement.style.width='100vw';
-    this.renderer.domElement.style.height='100vh';
-    this.renderer.domElement.style.zIndex='0';
-    this.renderer.domElement.style.pointerEvents='none';
     this.renderer.setPixelRatio(Math.min(devicePixelRatio,state.settings.pixelRatio));
-    this.renderer.shadowMap.enabled=state.settings.shadows;
-    this.renderer.shadowMap.type=THREE.PCFShadowMap;
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;
     this.renderer.toneMapping=THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure=1.05;
-    document.body.appendChild(this.renderer.domElement);
-    this.renderer.domElement.style.display='none';
-    this.controls=new PointerLockControls(this.camera,document.body);
-    this.controls.pointerSpeed=state.settings.sensitivity;
-    this.controls.maxPolarAngle=Math.PI*.94; this.controls.minPolarAngle=Math.PI*.06;
-    this.lastFrameTime=performance.now();
- this.keys={}; this.velocity=new THREE.Vector3(); this.canJump=false;
-    this.dash=false; this.crouch=false; this.slide=0; this.lean=0;
-    this.botMeshes=[]; this.colliders=[]; this.mapGroup=null; this.handGroup=null; this.weaponGroup=null; this.muzzleFlash=null;
-    this.running=false; this.paused=false; this.debug=false; this.health=100; this.stamina=100;
-    this.fireCooldown=0; this.weaponKick=0; this.selectedSlot=1;
-    this.ping=23; this.packetLoss=0; this.audioCtx=null;
-    this.previewScene=null; this.previewCamera=null; this.previewRenderer=null; this.previewGroup=null;
+    this.renderer.toneMappingExposure=1.15;
+    this.renderer.shadowMap.enabled=state.settings.shadows;
+    this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+    this.renderer.domElement.id='world-canvas';
+    this.renderer.domElement.style.cssText='position:fixed;inset:0;width:100vw;height:100vh;z-index:0;display:none;pointer-events:none';
+    document.getElementById('app').prepend(this.renderer.domElement);
+
+    this.controls=new SimplePointerLock(this.camera,document.body);
+    this.playerPos=new THREE.Vector3(0,0,8);
+    this.velocity=new THREE.Vector3();
+    this.keys={};
+    this.canJump=false;
+    this.dash=false;this.crouch=false;this.slideTimer=0;this.lean=0;
+    this.running=false;this.paused=false;this.debug=false;
+    this.health=100;this.stamina=100;
+    this.firing=false;this.fireCooldown=0;this.weaponKick=0;
+    this.currentWeaponType='primary';
+    this.magAmmo={primary:30,secondary:17,melee:0};
+    this.reserveAmmo={primary:120,secondary:68,melee:0};
+    this.reloading=false;this.reloadTimer=0;this.inspectTimer=0;this.inspecting=false;
+    this.enemies=[];this.colliders=[];this.breakableGlass=[];this.bulletHoles=[];
+    this.mapGroup=null;this.handGroup=null;this.weaponGroup=null;this.weaponSight=null;this.muzzleFlash=null;
+    this.lastFrameTime=performance.now();this.currentFPS=60;
+    this.ping=24;this.packetLoss=0;this.audioCtx=null;
+    this.terrainMesh=null;
+    this.previewScene=null;this.previewCamera=null;this.previewRenderer=null;this.previewGroup=null;
+
     this.initLoadingPreview();
-    this.bind(); this.animate();
+    this.bind();
+    this.animate();
   }
+
   bind(){
     addEventListener('resize',()=>{
       this.camera.aspect=innerWidth/innerHeight;this.camera.updateProjectionMatrix();
       this.renderer.setSize(innerWidth,innerHeight);
       this.renderer.setPixelRatio(Math.min(devicePixelRatio,state.settings.pixelRatio));
     });
-    addEventListener('keydown',e=>this.onKey(e,true)); addEventListener('keyup',e=>this.onKey(e,false));
-    addEventListener('mousedown',e=>this.onMouseDown(e)); addEventListener('mouseup',e=>this.onMouseUp(e));
-    this.controls.addEventListener('lock',()=>{this.paused=false;document.getElementById('pause-card').classList.add('hidden');document.getElementById('hint').style.display='none'});
-    this.controls.addEventListener('unlock',()=>{if(this.running&&!this.paused){this.paused=true;document.getElementById('pause-card').classList.remove('hidden')}});
+    addEventListener('keydown',e=>this.onKey(e,true));
+    addEventListener('keyup',e=>this.onKey(e,false));
+    addEventListener('mousedown',e=>this.onMouseDown(e));
+    addEventListener('mouseup',e=>this.onMouseUp(e));
+    this.controls.addEventListener('lock',()=>{
+      this.paused=false;
+      document.getElementById('pause-card')?.classList.add('hidden');
+      document.getElementById('hint').style.display='none';
+    });
+    this.controls.addEventListener('unlock',()=>{
+      if(this.running && !this.paused){
+        this.paused=true;this.firing=false;
+        document.getElementById('pause-card')?.classList.remove('hidden');
+      }
+    });
     document.getElementById('exit-to-menu').onclick=()=>this.stop();
-    addEventListener('mousedown',()=>{if(this.running&&!this.controls.isLocked&&!this.paused)this.controls.lock()});
+    document.getElementById('pause-card').addEventListener('click',e=>{
+      if(e.target.closest('#exit-to-menu'))return;
+      if(this.running&&this.paused)this.controls.lock();
+    });
+    addEventListener('mousedown',e=>{
+      if(this.running&&!this.controls.isLocked&&this.paused&&e.target.closest('#pause-card')===null)this.controls.lock();
+    });
   }
+
   onMouseDown(e){
-    if(e.button===0 && this.running && this.controls.isLocked && !this.paused){this.fire();}
+    if(e.button!==0||!this.running||!this.controls.isLocked||this.paused)return;
+    this.firing=true;
+    if(this.currentWeaponType==='melee')this.fire();
+    else this.fire();
   }
-  onMouseUp(e){ if(e.button===0)this.firing=false; }
+  onMouseUp(e){if(e.button===0)this.firing=false;}
+
   onKey(e,down){
     this.keys[e.code]=down;
     if((e.code==='ControlLeft'||e.code==='ControlRight')&&state.settings.dashMode==='toggle'&&down&&!e.repeat)this.dash=!this.dash;
-    if((e.code==='ShiftLeft'||e.code==='ShiftRight')&&state.settings.crouchMode==='toggle'&&down&&!e.repeat)this.crouch=!this.crouch;
-    if(e.code==='Space'&&down&&!e.repeat&&this.canJump&&!this.crouch){this.velocity.y=6.8;this.canJump=false;}
+    if((e.code==='ShiftLeft'||e.code==='ShiftRight')&&down&&!e.repeat){
+      if(this.dash&&this.isMoving())this.startSlide();
+      else if(state.settings.crouchMode==='toggle')this.crouch=!this.crouch;
+    }
+    if(e.code==='Space'&&down&&!e.repeat&&this.canJump&&!this.isSliding()){
+      this.velocity.y=8.2;this.canJump=false;
+    }
+    if(e.code==='Digit1'&&down&&!e.repeat){this.currentWeaponType='primary';this.finishWeaponSwitch();}
+    if(e.code==='Digit2'&&down&&!e.repeat){this.currentWeaponType='secondary';this.finishWeaponSwitch();}
+    if(e.code==='Digit3'&&down&&!e.repeat){this.currentWeaponType='melee';this.finishWeaponSwitch();}
+    if(e.code==='Digit4'&&down&&!e.repeat)this.useMedkit();
+    if(e.code==='KeyR'&&down&&!e.repeat)this.startReload();
+    if(e.code==='KeyH'&&down&&!e.repeat)this.startInspect();
     if(e.code==='Digit0'&&down&&!e.repeat)this.toggleDebug();
     if(e.code==='KeyG'&&down&&!e.repeat&&this.running&&this.controls.isLocked)this.breakNearestGlass();
-    if(/^Digit[1-9]$/.test(e.code)&&down&&!e.repeat){this.selectedSlot=Number(e.code.slice(-1));this.updateHotbar();}
-    if(e.code==='Digit0'&&down&&!e.repeat){this.selectedSlot=10;this.updateHotbar();}
   }
+
+  finishWeaponSwitch(){
+    this.reloading=false;this.inspecting=false;this.firing=false;this.updateWeaponModel();this.updateHUD();
+  }
+  startSlide(){this.slideTimer=.68;this.crouch=false;this.dash=true;}
+  isSliding(){return this.slideTimer>0;}
+  isMoving(){return !!(this.keys.KeyW||this.keys.KeyA||this.keys.KeyS||this.keys.KeyD);}
+
   toggleDebug(){this.debug=!this.debug;document.getElementById('debug-panel').classList.toggle('hidden',!this.debug);}
-  mapLabel(map){return map==='city'?'市街地 / ブロック7':map==='mountain'?'山岳 / リッジライン':'室内 / 施設03'}
+
+  mapLabel(map){return map==='city'?'市街地 / ブロック7':map==='mountain'?'山岳 / 森林リッジ':'室内 / 施設03'}
   missionData(map){
     return {
-      city:{title:'市街地 / ブロック7',code:'CITY // BLOCK 7',brief:'都市区画を横断し、指定エリアの状況を確認する。建物の密集と遮蔽物を利用して安全に観測する。',tips:['中距離を維持','遮蔽物を活用','交差点を優先確認']},
-      mountain:{title:'山岳 / リッジライン',code:'MOUNTAIN // RIDGELINE',brief:'高低差の大きい山岳地帯を進み、尾根と斜面から周辺を観測する。足場の変化に注意。',tips:['斜面では低速移動','尾根から周辺確認','谷側の視界に注意']},
-      interior:{title:'室内 / 施設03',code:'INTERIOR // FACILITY 03',brief:'複数区画を持つ施設内部を探索し、各フロアの状況を確認する。ガラスや狭い通路で視界が変化する。',tips:['角を小さく確認','長い廊下に注意','開口部を活用']}
+      city:{title:'市街地 / ブロック7',code:'CITY // BLOCK 7',brief:'都市区画を横断し、建物・路地・遮蔽物を活用してフィールドを確認する。',tips:['交差点を確認','遮蔽物を活用','建物間を移動']},
+      mountain:{title:'山岳 / 森林リッジ',code:'MOUNTAIN // FOREST RIDGE',brief:'深い針葉樹林と急斜面が続く森林山岳地帯。標高差を利用して周囲を観測する。',tips:['斜面で速度低下','木々を遮蔽に利用','尾根から観測']},
+      interior:{title:'室内 / 施設03',code:'INTERIOR // FACILITY 03',brief:'複数区画を持つ施設内部。廊下・階段・窓によって視界が頻繁に変化する。',tips:['角を小さく確認','階段の高低差に注意','ガラスを活用']}
     }[map];
   }
+
   initLoadingPreview(){
-    const el=document.getElementById('loading-preview'); if(!el)return;
+    const el=document.getElementById('loading-preview');if(!el)return;
     this.previewRenderer=new THREE.WebGLRenderer({antialias:true,alpha:true,powerPreference:'high-performance'});
-    this.previewRenderer.setPixelRatio(Math.min(devicePixelRatio,1.5)); this.previewRenderer.setSize(el.clientWidth||560,el.clientHeight||360,false);
-    this.previewRenderer.outputColorSpace=THREE.SRGBColorSpace;this.previewRenderer.toneMapping=THREE.ACESFilmicToneMapping;
-    el.appendChild(this.previewRenderer.domElement);this.previewScene=new THREE.Scene();
-    this.previewCamera=new THREE.PerspectiveCamera(42,(el.clientWidth||560)/(el.clientHeight||360),.1,100);this.previewCamera.position.set(11,10,14);this.previewCamera.lookAt(0,0,0);
-    this.previewScene.add(new THREE.HemisphereLight(0xddeeff,0x222a27,2.1)); const sun=new THREE.DirectionalLight(0xdff6e8,2.6);sun.position.set(8,15,6);this.previewScene.add(sun);
+    this.previewRenderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
+    this.previewRenderer.setSize(el.clientWidth||560,el.clientHeight||360,false);
+    this.previewRenderer.outputColorSpace=THREE.SRGBColorSpace;
+    el.appendChild(this.previewRenderer.domElement);
+    this.previewScene=new THREE.Scene();
+    this.previewCamera=new THREE.PerspectiveCamera(42,(el.clientWidth||560)/(el.clientHeight||360),.1,100);
+    this.previewCamera.position.set(11,10,14);
+    this.previewScene.add(new THREE.HemisphereLight(0xe8f7ff,0x26332d,2.5));
+    const sun=new THREE.DirectionalLight(0xfff2c7,3.2);sun.position.set(8,15,6);this.previewScene.add(sun);
   }
   buildPreview(map){
     if(!this.previewScene)return;
-    if(this.previewGroup){this.previewGroup.traverse(o=>{o.geometry?.dispose?.();if(Array.isArray(o.material))o.material.forEach(m=>m.dispose?.());else o.material?.dispose?.()});this.previewScene.remove(this.previewGroup)}
+    if(this.previewGroup){this.previewGroup.traverse(o=>{o.geometry?.dispose?.();o.material?.dispose?.()});this.previewScene.remove(this.previewGroup);}
     const g=new THREE.Group();this.previewGroup=g;this.previewScene.add(g);
-    const floor=new THREE.Mesh(new THREE.BoxGeometry(32,.4,24),new THREE.MeshStandardMaterial({color:0x263136,roughness:1}));floor.position.y=-.2;g.add(floor);
-    const block=(x,z,sx,sy,sz,c=0x536067)=>{const o=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),new THREE.MeshStandardMaterial({color:c,roughness:.82}));o.position.set(x,sy/2,z);g.add(o);return o};
-    if(map==='city'){for(let i=0;i<12;i++){const x=(i%4)*8-12,z=Math.floor(i/4)*7-7;block(x,z,6,4+(i%3)*2,5,0x49545a)}for(let i=0;i<6;i++)block((i-2.5)*8,0,1.2,.35,22,0x252f34)}
-    else if(map==='mountain'){const mat=new THREE.MeshStandardMaterial({color:0x687269,roughness:1});for(let i=0;i<16;i++){const x=(i%4)*8-12,z=Math.floor(i/4)*7-10,h=1.2+(i%5)*.9;const o=new THREE.Mesh(new THREE.ConeGeometry(3+h*.55,h,5),mat);o.position.set(x,h/2-.1,z);o.rotation.y=i*.6;g.add(o)}for(let i=0;i<5;i++)block((i-2)*7,0,2,.5,18,0x39423f)}
-    else {for(let i=0;i<5;i++){block(-12+i*6,0,5,4,.55,0x444d52);block(-12+i*6,8,5,4,.55,0x444d52)}for(let z=-7;z<=7;z+=7){block(-14,0,.55,8,6,0x444d52);block(14,0,.55,8,6,0x444d52)}const glass=new THREE.MeshPhysicalMaterial({color:0x9fd6df,transparent:true,opacity:.24,roughness:.04});for(let i=0;i<3;i++){const w=new THREE.Mesh(new THREE.BoxGeometry(4,2.5,.08),glass);w.position.set(-9+i*9,2.2,-7.2);g.add(w)}}
-    const marker=new THREE.Mesh(new THREE.CylinderGeometry(.7,.7,.12,24),new THREE.MeshStandardMaterial({color:0xd9ff5f,emissive:0x40520f,emissiveIntensity:1.5}));marker.position.y=.08;g.add(marker);
+    const floor=new THREE.Mesh(new THREE.BoxGeometry(32,.4,24),new THREE.MeshStandardMaterial({color:0x34413f,roughness:1}));floor.position.y=-.2;g.add(floor);
+    const block=(x,z,sx,sy,sz,c=0x556064)=>{const o=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),new THREE.MeshStandardMaterial({color:c,roughness:.82}));o.position.set(x,sy/2,z);g.add(o)};
+    if(map==='city'){
+      for(let i=0;i<10;i++){const x=(i%5)*7-14,z=Math.floor(i/5)*8-8;block(x,z,5,4+(i%3)*2,5,i%2?0x4c575d:0x394449)}
+    }else if(map==='mountain'){
+      for(let i=0;i<13;i++){const x=(i%5)*7-14,z=Math.floor(i/5)*8-9,h=2+(i%4);const o=new THREE.Mesh(new THREE.ConeGeometry(3+h*.3,h,7),new THREE.MeshStandardMaterial({color:0x66705f,roughness:1}));o.position.set(x,h/2-.1,z);g.add(o)}
+      for(let i=0;i<8;i++){const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.15,.2,1.8,6),new THREE.MeshStandardMaterial({color:0x514437}));const x=(i*7%28)-14,z=(i*11%20)-10;trunk.position.set(x,.9,z);g.add(trunk);const crown=new THREE.Mesh(new THREE.ConeGeometry(1.1,3.2,7),new THREE.MeshStandardMaterial({color:0x2f6538,roughness:1}));crown.position.set(x,2.5,z);g.add(crown)}
+    }else{for(let i=0;i<5;i++){block(-12+i*6,0,5,4,.55,0x444d52);block(-12+i*6,8,5,4,.55,0x444d52)}}
   }
   updateLoadingInfo(map){
-    const data=this.missionData(map), $=id=>document.getElementById(id);
+    const data=this.missionData(map),$=id=>document.getElementById(id);
     $('loading-title').textContent=data.title;$('loading-code').textContent=data.code;$('loading-brief').textContent=data.brief;
     $('loading-tip-1').textContent=data.tips[0];$('loading-tip-2').textContent=data.tips[1];$('loading-tip-3').textContent=data.tips[2];
     $('load-rec-armor').textContent=state.armor;$('load-rec-helmet').textContent=state.helmet;$('load-rec-tool').textContent=state.primary;$('load-rec-support').textContent=state.secondary;$('load-bots').textContent=String(state.bots).padStart(2,'0');
     this.buildPreview(map);
   }
+
   async start(map,bots){
-    state.map=map;state.bots=bots;document.querySelectorAll('.screen').forEach(x=>x.classList.remove('active'));document.getElementById('loading-screen').classList.add('active');
-    this.updateLoadingInfo(map);this.renderer.domElement.style.display='none';this.running=false;
-    const fill=document.getElementById('loading-fill'),pct=document.getElementById('loading-percent'),status=document.getElementById('loading-status');pct.textContent='0%';fill.style.width='0%';
-    const steps=[['設定を確認しています…',12],['ライティングを準備しています…',28],['地形を生成しています…',50],['オブジェクトを配置しています…',72],['偵察ドローンを起動しています…',90],['フィールド同期を確認しています…',97],['完了',100]];
+    state.map=map;state.bots=bots;
+    document.querySelectorAll('.screen').forEach(x=>x.classList.remove('active'));
+    document.getElementById('loading-screen').classList.add('active');
+    this.updateLoadingInfo(map);
+    this.renderer.domElement.style.display='none';this.running=false;
+    const fill=document.getElementById('loading-fill'),pct=document.getElementById('loading-percent'),status=document.getElementById('loading-status');
+    pct.textContent='0%';fill.style.width='0%';
+    const steps=[['設定を確認しています…',10],['ライティングを準備しています…',24],['地形を生成しています…',48],['森林・建物を配置しています…',68],['人型ユニットを配置しています…',84],['フィールド同期を確認しています…',96],['完了',100]];
     for(const [msg,target] of steps){status.textContent=msg;await this.loadingTo(target,fill,pct)}
-    this.buildScene();await new Promise(r=>setTimeout(r,220));document.getElementById('loading-screen').classList.remove('active');document.getElementById('game-ui').classList.remove('hidden');
-    this.renderer.domElement.style.display='block';this.running=true;this.paused=false;this.health=100;this.stamina=100;this.ping=20+Math.round(Math.random()*15);this.packetLoss=0;this.controls.lock();
-    document.getElementById('drone-counter').textContent=String(bots);this.updateHotbar();this.updateHealth();
+    this.buildScene();
+    await new Promise(r=>setTimeout(r,160));
+    document.getElementById('loading-screen').classList.remove('active');document.getElementById('game-ui').classList.remove('hidden');
+    this.renderer.domElement.style.display='block';this.running=true;this.paused=false;this.health=100;this.stamina=100;this.magAmmo.primary=WEAPONS.primary[state.primary]?.mag||30;this.magAmmo.secondary=WEAPONS.secondary[state.secondary]?.mag||17;
+    this.reserveAmmo.primary=(this.magAmmo.primary||30)*4;this.reserveAmmo.secondary=(this.magAmmo.secondary||17)*4;
+    this.ping=20+Math.round(Math.random()*15);this.packetLoss=0;this.currentWeaponType='primary';this.updateWeaponModel();this.updateHUD();
+    document.getElementById('enemy-counter').textContent=String(bots);this.controls.lock();
   }
-  loadingTo(target,fill,pct){return new Promise(resolve=>{const tick=()=>{const cur=Number(pct.textContent.replace('%',''))||0,next=Math.min(target,cur+2);pct.textContent=`${next}%`;fill.style.width=`${next}%`;if(next>=target)resolve();else requestAnimationFrame(tick)};tick()})}
+  loadingTo(target,fill,pct){return new Promise(resolve=>{const tick=()=>{const cur=Number(pct.textContent.replace('%',''))||0;const next=Math.min(target,cur+2);pct.textContent=`${next}%`;fill.style.width=`${next}%`;if(next>=target)resolve();else requestAnimationFrame(tick)};tick()})}
+
   stop(){
-    this.running=false;this.paused=false;this.controls.unlock();this.renderer.domElement.style.display='none';document.getElementById('game-ui').classList.add('hidden');document.getElementById('loading-screen').classList.remove('active');document.getElementById('debug-panel').classList.add('hidden');go('deploy-screen');
+    this.running=false;this.paused=false;this.controls.unlock();this.renderer.domElement.style.display='none';
+    document.getElementById('game-ui').classList.add('hidden');document.getElementById('loading-screen').classList.remove('active');document.getElementById('debug-panel').classList.add('hidden');
+    go('deploy-screen');
     if(this.mapGroup){this.mapGroup.traverse(o=>{o.geometry?.dispose?.();if(Array.isArray(o.material))o.material.forEach(m=>m.dispose?.());else o.material?.dispose?.()});this.scene.remove(this.mapGroup)}
-    if(this.handGroup){this.camera.remove(this.handGroup);this.handGroup=null} if(this.weaponGroup){this.camera.remove(this.weaponGroup);this.weaponGroup=null}
-    this.botMeshes=[];this.colliders=[];this.mapGroup=null;
+    if(this.handGroup)this.camera.remove(this.handGroup);if(this.weaponGroup)this.camera.remove(this.weaponGroup);
+    this.handGroup=this.weaponGroup=null;this.mapGroup=null;this.colliders=[];this.enemies=[];this.breakableGlass=[];this.bulletHoles=[];this.terrainMesh=null;
   }
+
   buildScene(){
-    // Rebuild the world from scratch. Keep the camera in the scene graph so
-    // camera-mounted hands/tools are always rendered after scene.clear().
-    if(this.mapGroup){
-      this.mapGroup.traverse(o=>{
-        o.geometry?.dispose?.();
-        if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose?.());
-        else o.material?.dispose?.();
-      });
-    }
-    // Keep the camera object and rebuild only the world.  The camera must never be
-    // accidentally detached from the scene during a respawn.
-    for(const child of [...this.scene.children]){
-      if(child!==this.camera) this.scene.remove(child);
-    }
+    for(const child of [...this.scene.children])if(child!==this.camera)this.scene.remove(child);
     this.scene.add(this.camera);
-    // Bright fallback sky: even if a future asset fails to load, the player will
-    // never be left looking into a black canvas.
-    this.scene.background=new THREE.Color(0x78a9bf);
-    this.scene.fog=new THREE.Fog(0x78a9bf,120,420);
-    this.mapGroup=new THREE.Group();
-    this.scene.add(this.mapGroup);
-    this.colliders=[];this.botMeshes=[];this.breakableGlass=[];
+    this.scene.background=new THREE.Color(state.map==='mountain'?0x87adbb:0x78a3b5);
+    this.scene.fog=new THREE.Fog(state.map==='mountain'?0x87adbb:0x78a3b5,120,state.map==='mountain'?430:360);
+    this.mapGroup=new THREE.Group();this.scene.add(this.mapGroup);this.colliders=[];this.enemies=[];this.breakableGlass=[];this.bulletHoles=[];
 
-    const hemi=new THREE.HemisphereLight(0xffffff,0x56634f,3.5);
-    this.mapGroup.add(hemi);
-    const sun=new THREE.DirectionalLight(0xfff1c4,5.5);
-    sun.position.set(-70,95,35); sun.castShadow=state.settings.shadows;
-    sun.shadow.mapSize.set(1024,1024);
-    sun.shadow.camera.left=-110;sun.shadow.camera.right=110;
-    sun.shadow.camera.top=110;sun.shadow.camera.bottom=-110;
-    sun.shadow.bias=-0.0005;
-    this.mapGroup.add(sun);
-
+    const hemi=new THREE.HemisphereLight(0xf2fbff,0x4b5848,3.0);this.mapGroup.add(hemi);
+    const sun=new THREE.DirectionalLight(0xfff1c7,4.8);sun.position.set(-75,110,35);sun.castShadow=state.settings.shadows;sun.shadow.mapSize.set(1024,1024);sun.shadow.camera.left=-140;sun.shadow.camera.right=140;sun.shadow.camera.top=140;sun.shadow.camera.bottom=-140;sun.shadow.bias=-0.0005;this.mapGroup.add(sun);
     this.addSky();
-    this.addGround();
-    this.addGrassClusters();
-    if(state.map==='city')this.buildCity();
-    else if(state.map==='mountain')this.buildMountain();
-    else this.buildInterior();
+    if(state.map==='mountain'){this.buildMountainTerrain();this.addGrassClusters(true);this.buildMountain();}
+    else {this.addGround();this.addGrassClusters(false);state.map==='city'?this.buildCity():this.buildInterior();}
     this.addDistantSilhouette();
-
-    this.spawnDrones(state.bots);
+    this.spawnHumans(state.bots);
     this.addHands();this.addWeapon();
-    // Guaranteed open spawn area. This prevents spawning inside a building/rock after restarting a map.
-    const spawns={city:[0,1.72,8],mountain:[0,1.72,8],interior:[0,1.72,8]};
-    const s=spawns[state.map]||spawns.city;
-    this.camera.position.set(s[0],s[1],s[2]);
-    this.camera.rotation.set(0,0,0);
-    this.camera.lookAt(0,1.55,-24);
-    // three.js r0.185 PointerLockControls controls the camera directly;
-    // getObject() existed in older releases and is not part of the current API.
-    this.velocity.set(0,0,0);this.canJump=true;
-    this.updateHotbar();
+    const spawns={city:[0,8],mountain:[0,4],interior:[0,8]};const s=spawns[state.map]||spawns.city;this.playerPos.set(s[0],this.groundHeightAt(s[0],s[1]),s[1]);this.velocity.set(0,0,0);this.canJump=true;
+    this.camera.rotation.order='YXZ';this.camera.rotation.set(0,0,0);this.updateCameraTransform(0);
+    this.updateWeaponModel();
   }
 
   addSky(){
     if(!state.settings.sky)return;
-    const sky=new THREE.Mesh(
-      new THREE.SphereGeometry(300,40,24),
-      new THREE.MeshBasicMaterial({color:0x7fa9c0,side:THREE.BackSide,fog:false})
-    );
-    sky.frustumCulled=false;
-    this.mapGroup.add(sky);
-    const sunSphere=new THREE.Mesh(new THREE.SphereGeometry(5.5,24,24),new THREE.MeshBasicMaterial({color:0xffefb0}));
-    sunSphere.position.set(-105,95,-135);sunSphere.frustumCulled=false;this.mapGroup.add(sunSphere);
-    const glow=new THREE.Mesh(new THREE.SphereGeometry(14,20,20),new THREE.MeshBasicMaterial({color:0xffe8a0,transparent:true,opacity:.13,depthWrite:false}));
-    glow.position.copy(sunSphere.position);glow.frustumCulled=false;this.mapGroup.add(glow);
+    const sky=new THREE.Mesh(new THREE.SphereGeometry(330,32,20),new THREE.MeshBasicMaterial({color:state.map==='mountain'?0x8eb8c8:0x7da8bb,side:THREE.BackSide,fog:false}));sky.frustumCulled=false;this.mapGroup.add(sky);
+    const sun=new THREE.Mesh(new THREE.SphereGeometry(6,24,24),new THREE.MeshBasicMaterial({color:0xfff0ae}));sun.position.set(-105,105,-140);sun.frustumCulled=false;this.mapGroup.add(sun);
+    const glow=new THREE.Mesh(new THREE.SphereGeometry(16,20,20),new THREE.MeshBasicMaterial({color:0xffe8a1,transparent:true,opacity:.12,depthWrite:false}));glow.position.copy(sun.position);glow.frustumCulled=false;this.mapGroup.add(glow);
   }
 
+  groundHeightAt(x,z){return state.map==='mountain'?this.terrainHeight(x,z):0;}
+  terrainHeight(x,z){
+    const ridge=Math.sin(x*.055)*4.5+Math.cos(z*.052)*3.8+Math.sin((x+z)*.028)*5.2;
+    const valley=-(Math.cos(x*.11)+Math.sin(z*.09))*1.1;
+    const fall=Math.min(1,Math.hypot(x,z)/95);
+    return Math.max(-1.5,(ridge+valley)*fall);
+  }
+  buildMountainTerrain(){
+    const size=260,seg=64,geo=new THREE.PlaneGeometry(size,size,seg,seg);geo.rotateX(-Math.PI/2);
+    const pos=geo.attributes.position;for(let i=0;i<pos.count;i++){const x=pos.getX(i),z=pos.getZ(i);pos.setY(i,this.terrainHeight(x,z));}pos.needsUpdate=true;geo.computeVertexNormals();
+    const mat=new THREE.MeshStandardMaterial({color:0x6d8c50,roughness:1,metalness:0});this.terrainMesh=new THREE.Mesh(geo,mat);this.terrainMesh.receiveShadow=true;this.mapGroup.add(this.terrainMesh);
+  }
   addGround(){
-    // Unlit fallback first: terrain remains visible even when texture loading or
-    // color management changes between browsers.
-    const fallbackMat=new THREE.MeshBasicMaterial({color:0x6f955c});
-    const fallback=new THREE.Mesh(new THREE.PlaneGeometry(420,420),fallbackMat);
-    fallback.rotation.x=-Math.PI/2;fallback.receiveShadow=true;fallback.name='ground-fallback';
-    this.mapGroup.add(fallback);
-
-    const tex=new THREE.TextureLoader();
-    tex.load('./assets/grass.svg',(texture)=>{
-      texture.wrapS=texture.wrapT=THREE.RepeatWrapping;
-      texture.repeat.set(64,64);
-      texture.anisotropy=Math.min(4,this.renderer.capabilities.getMaxAnisotropy());
-      texture.colorSpace=THREE.SRGBColorSpace;
-      const mat=new THREE.MeshLambertMaterial({map:texture,color:0xb0cf86});
-      const ground=new THREE.Mesh(new THREE.PlaneGeometry(380,380),mat);
-      ground.rotation.x=-Math.PI/2;ground.position.y=0.01;ground.receiveShadow=true;ground.name='ground-textured';
-      this.mapGroup.add(ground);
-    },undefined,()=>{});
+    const fallback=new THREE.Mesh(new THREE.PlaneGeometry(420,420),new THREE.MeshLambertMaterial({color:0x6c8f55}));fallback.rotation.x=-Math.PI/2;fallback.receiveShadow=true;this.mapGroup.add(fallback);
+    new THREE.TextureLoader().load('./assets/grass.svg',texture=>{texture.wrapS=texture.wrapT=THREE.RepeatWrapping;texture.repeat.set(72,72);texture.anisotropy=Math.min(4,this.renderer.capabilities.getMaxAnisotropy());texture.colorSpace=THREE.SRGBColorSpace;const mat=new THREE.MeshLambertMaterial({map:texture,color:0xb6cf8d});const ground=new THREE.Mesh(new THREE.PlaneGeometry(410,410),mat);ground.rotation.x=-Math.PI/2;ground.position.y=.01;ground.receiveShadow=true;this.mapGroup.add(ground);},undefined,()=>{});
   }
-
-  addGrassClusters(){
-    // Lightweight instanced grass tufts. This gives the terrain depth without
-    // creating tens of thousands of separate Mesh objects.
-    const blade=new THREE.PlaneGeometry(.16,.85,1,2);
-    blade.translate(0,.42,0);
-    const mat=new THREE.MeshStandardMaterial({color:0x5f8b43,side:THREE.DoubleSide,roughness:1,transparent:true,opacity:.82});
-    for(let patch=0;patch<3;patch++){
-      const count=patch===0?520:260;
-      const inst=new THREE.InstancedMesh(blade,mat,count);
-      const dummy=new THREE.Object3D();
-      let n=0;
-      for(let i=0;i<count;i++){
-        const a=Math.random()*Math.PI*2,r=12+Math.random()*115;
-        let x=Math.cos(a)*r+(Math.random()-.5)*7;
-        let z=Math.sin(a)*r+(Math.random()-.5)*7;
-        if(Math.hypot(x,z)<8 && state.map!=='mountain') continue;
-        dummy.position.set(x,.02,z);
-        dummy.scale.setScalar(.45+Math.random()*1.25);
-        dummy.rotation.set(0,Math.random()*Math.PI,0);
-        dummy.updateMatrix();inst.setMatrixAt(n++,dummy.matrix);
-      }
-      inst.count=n;inst.instanceMatrix.needsUpdate=true;inst.castShadow=false;inst.receiveShadow=true;
-      this.mapGroup.add(inst);
+  addGrassClusters(mountain){
+    const blade=new THREE.PlaneGeometry(.16,.9,1,2);blade.translate(0,.45,0);const mat=new THREE.MeshStandardMaterial({color:0x4f7d3d,side:THREE.DoubleSide,roughness:1,transparent:true,opacity:.88});
+    for(let patch=0;patch<(mountain?5:3);patch++){
+      const count=mountain?350:260,inst=new THREE.InstancedMesh(blade,mat,count),dummy=new THREE.Object3D();let n=0;
+      for(let i=0;i<count;i++){const a=Math.random()*Math.PI*2,r=mountain?8+Math.random()*120:12+Math.random()*115;const x=Math.cos(a)*r+(Math.random()-.5)*6,z=Math.sin(a)*r+(Math.random()-.5)*6;if(Math.hypot(x,z)<8&&!mountain)continue;dummy.position.set(x,this.groundHeightAt(x,z)+.02,z);dummy.scale.setScalar(.4+Math.random()*1.15);dummy.rotation.set(0,Math.random()*Math.PI,0);dummy.updateMatrix();inst.setMatrixAt(n++,dummy.matrix)}inst.count=n;inst.instanceMatrix.needsUpdate=true;this.mapGroup.add(inst);
     }
   }
 
-  box(x,y,z,sx,sy,sz,c=0x515a61,opts={}){
-    const m=new THREE.MeshLambertMaterial({color:c});
-    const o=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),m);
-    o.position.set(x,y,z);o.castShadow=true;o.receiveShadow=true;o.name=opts.name||'structure';
-    this.mapGroup.add(o);
-    if(opts.collider!==false)this.colliders.push({minX:x-sx/2,maxX:x+sx/2,minZ:z-sz/2,maxZ:z+sz/2,type:'box',object:o});
-    return o;
-  }
-
-  tree(x,z,s=1){
-    const g=new THREE.Group();g.position.set(x,0,z);
-    const bark=new THREE.MeshLambertMaterial({color:0x5a4632});
-    const green=new THREE.MeshLambertMaterial({color:0x2b6937});
-    const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.22*s,.34*s,2.4*s,7),bark);trunk.position.y=1.2*s;trunk.castShadow=true;g.add(trunk);
-    for(let i=0;i<3;i++){
-      const crown=new THREE.Mesh(new THREE.ConeGeometry((1.15-i*.17)*s,(2.2-i*.25)*s,8),green);
-      crown.position.y=(2.2+i*.72)*s;crown.castShadow=true;g.add(crown);
-    }
-    this.mapGroup.add(g);
-    this.colliders.push({minX:x-.38*s,maxX:x+.38*s,minZ:z-.38*s,maxZ:z+.38*s,type:'box',object:g});
-    return g;
-  }
-
-  rock(x,z,s=1,c=0x68716b){
-    const m=new THREE.MeshLambertMaterial({color:c});
-    const g=new THREE.DodecahedronGeometry(1.1*s,0);
-    const o=new THREE.Mesh(g,m);o.position.set(x,.7*s,z);o.scale.set(1.4,0.72,1);o.rotation.y=Math.random()*Math.PI;o.castShadow=true;o.receiveShadow=true;
-    this.mapGroup.add(o);
-    this.colliders.push({minX:x-1.3*s,maxX:x+1.3*s,minZ:z-1*s,maxZ:z+1*s,type:'box',object:o});
-    return o;
-  }
-
-  stairs(x,z,w=5,steps=8,rise=.4,depth=.55,dir=0,c=0x4b5558){
-    const g=new THREE.Group();g.position.set(x,0,z);g.rotation.y=dir;
-    for(let i=0;i<steps;i++){
-      const h=(i+1)*rise;
-      const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,depth*(i+1)),new THREE.MeshStandardMaterial({color:c,roughness:.86}));
-      o.position.set(0,h/2,(i*depth)/2);o.castShadow=true;o.receiveShadow=true;g.add(o);
-    }
-    this.mapGroup.add(g);
-    // Broad conservative collision volume keeps the player from walking through the staircase.
-    const span=steps*depth;
-    const corners=[
-      new THREE.Vector3(-w/2,0,-depth/2),new THREE.Vector3(w/2,0,span),
-    ];
-    const cc=new THREE.Vector3(x,0,z); // axis-aligned approximation
-    this.colliders.push({minX:cc.x-w/2-0.1,maxX:cc.x+w/2+0.1,minZ:cc.z-depth/2-.2,maxZ:cc.z+span+.2,type:'box'});
-    return g;
-  }
-
-  door(x,y,z,w=2.2,h=2.8,rot=0){
-    const g=new THREE.Group();g.position.set(x,y,z);g.rotation.y=rot;
-    const frameMat=new THREE.MeshStandardMaterial({color:0x283034,roughness:.7,metalness:.25});
-    const panelMat=new THREE.MeshStandardMaterial({color:0x4c5659,roughness:.72});
-    const top=new THREE.Mesh(new THREE.BoxGeometry(w+.35,.16,.22),frameMat);top.position.y=h/2;g.add(top);
-    const left=new THREE.Mesh(new THREE.BoxGeometry(.16,h,.22),frameMat);left.position.x=-w/2;left.position.y=h/2;g.add(left);
-    const right=left.clone();right.position.x=w/2;g.add(right);
-    const panel=new THREE.Mesh(new THREE.BoxGeometry(w-.12,h-.18,.12),panelMat);panel.position.y=h/2;panel.castShadow=true;panel.receiveShadow=true;g.add(panel);
-    this.mapGroup.add(g);
-    this.colliders.push({minX:x-w/2,maxX:x+w/2,minZ:z-.13,maxZ:z+.13,type:'box',object:g,door:true});
-    return g;
-  }
-
-  windowGlass(x,y,z,w=3,h=2.2,rot=0){
-    const mat=new THREE.MeshPhysicalMaterial({color:0x9bd6e3,transparent:true,opacity:.30,roughness:.04,metalness:.05,transmission:.22,side:THREE.DoubleSide});
-    const g=new THREE.Mesh(new THREE.BoxGeometry(w,h,.08),mat);g.position.set(x,y,z);g.rotation.y=rot;g.castShadow=false;g.receiveShadow=true;g.userData.breakable=true;g.name='breakable-glass';
-    this.mapGroup.add(g);this.breakableGlass.push(g);return g;
-  }
+  box(x,y,z,sx,sy,sz,c=0x515a61,opts={}){const o=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),new THREE.MeshStandardMaterial({color:c,roughness:.78,metalness:.04}));o.position.set(x,y,z);o.castShadow=true;o.receiveShadow=true;o.name=opts.name||'structure';this.mapGroup.add(o);if(opts.collider!==false)this.colliders.push({minX:x-sx/2,maxX:x+sx/2,minZ:z-sz/2,maxZ:z+sz/2,type:'box'});return o}
+  tree(x,z,s=1){const y=this.groundHeightAt(x,z),g=new THREE.Group();g.position.set(x,y,z);const bark=new THREE.MeshStandardMaterial({color:0x4e3a28,roughness:1});const green=new THREE.MeshStandardMaterial({color:0x1f5a32,roughness:1});const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.18*s,.30*s,2.6*s,8),bark);trunk.position.y=1.3*s;trunk.castShadow=true;g.add(trunk);for(let i=0;i<4;i++){const crown=new THREE.Mesh(new THREE.ConeGeometry((1.2-i*.16)*s,(2.4-i*.27)*s,9),green);crown.position.y=(2.2+i*.7)*s;crown.rotation.y=i*.8;crown.castShadow=true;g.add(crown)}this.mapGroup.add(g);this.colliders.push({minX:x-.42*s,maxX:x+.42*s,minZ:z-.42*s,maxZ:z+.42*s,type:'box'});return g}
+  rock(x,z,s=1,c=0x667068){const y=this.groundHeightAt(x,z);const o=new THREE.Mesh(new THREE.DodecahedronGeometry(1.1*s,1),new THREE.MeshStandardMaterial({color:c,roughness:1}));o.position.set(x,y+.8*s,z);o.scale.set(1.4,.75,1);o.rotation.set(Math.random(),Math.random()*Math.PI,Math.random());o.castShadow=true;o.receiveShadow=true;this.mapGroup.add(o);this.colliders.push({minX:x-1.25*s,maxX:x+1.25*s,minZ:z-1*s,maxZ:z+1*s,type:'box'});return o}
+  stairs(x,z,w=5,steps=8,rise=.4,depth=.55,dir=0,c=0x4b5558){const g=new THREE.Group();g.position.set(x,this.groundHeightAt(x,z),z);g.rotation.y=dir;for(let i=0;i<steps;i++){const h=(i+1)*rise,o=new THREE.Mesh(new THREE.BoxGeometry(w,h,depth*(i+1)),new THREE.MeshStandardMaterial({color:c,roughness:.86}));o.position.set(0,h/2,(i*depth)/2);o.castShadow=true;o.receiveShadow=true;g.add(o)}this.mapGroup.add(g);this.colliders.push({minX:x-w/2-.1,maxX:x+w/2+.1,minZ:z-depth/2-.2,maxZ:z+steps*depth+.2,type:'box'});return g}
+  door(x,y,z,w=2.2,h=2.8,rot=0){const g=new THREE.Group();g.position.set(x,y,z);g.rotation.y=rot;const fm=new THREE.MeshStandardMaterial({color:0x283034,roughness:.7,metalness:.25}),pm=new THREE.MeshStandardMaterial({color:0x4c5659,roughness:.72});const top=new THREE.Mesh(new THREE.BoxGeometry(w+.35,.16,.22),fm);top.position.y=h;g.add(top);const l=new THREE.Mesh(new THREE.BoxGeometry(.16,h,.22),fm);l.position.set(-w/2,h/2,0);g.add(l);const r=l.clone();r.position.x=w/2;g.add(r);const p=new THREE.Mesh(new THREE.BoxGeometry(w-.12,h-.18,.12),pm);p.position.y=h/2;p.castShadow=true;g.add(p);this.mapGroup.add(g);this.colliders.push({minX:x-w/2,maxX:x+w/2,minZ:z-.13,maxZ:z+.13,type:'box'});return g}
+  windowGlass(x,y,z,w=3,h=2.2,rot=0){const m=new THREE.MeshPhysicalMaterial({color:0x9bd6e3,transparent:true,opacity:.28,roughness:.04,metalness:.05,transmission:.14,side:THREE.DoubleSide});const g=new THREE.Mesh(new THREE.BoxGeometry(w,h,.08),m);g.position.set(x,y,z);g.rotation.y=rot;g.userData.breakable=true;this.mapGroup.add(g);this.breakableGlass.push(g);return g}
 
   buildCity(){
-    // Main road grid
-    for(let x=-60;x<=60;x+=20)this.box(x,.06,0,4,.12,132,0x293238,{collider:false});
-    for(let z=-60;z<=60;z+=20)this.box(0,.065,z,132,.13,4,0x293238,{collider:false});
-    // Blocks, courtyards and rooftops
+    for(let x=-60;x<=60;x+=20)this.box(x,.06,0,4,.12,132,0x293238,{collider:false});for(let z=-60;z<=60;z+=20)this.box(0,.065,z,132,.13,4,0x293238,{collider:false});
     const blocks=[[-45,-42,10,8,16],[0,-44,12,12,21],[42,-42,12,14,14],[-44,0,16,12,12],[42,1,14,18,18],[-42,42,13,10,17],[2,40,17,13,20],[44,43,12,11,13]];
-    blocks.forEach((b,i)=>{
-      const [x,z,w,d,h]=b;this.box(x,h/2,z,w,h,d,i%2?0x4e565b:0x454e53);
-      // roof units / vents
-      this.box(x+(i%2?2:-2),h+.7,z-.8,2,.9,2,0x323b3e);
-    });
-    // Low cover and barriers in alleys
-    for(let i=0;i<18;i++){
-      const x=((i*23)%100)-50,z=((i*41)%100)-50;
-      if(Math.abs(x)<12&&Math.abs(z)<12)continue;
-      this.box(x,.65,z,3.8,1.3,1.0,i%2?0x3b474b:0x56605f);
-    }
-    // Doors, windows and glass fronts
-    this.door(-45,0,-33,2.2,3.2,0);this.door(42,0,-34,2.5,3.2,0);
-    this.windowGlass(-41,4,-50,3,2.2,0);this.windowGlass(-49,4,-50,3,2.2,0);
-    this.windowGlass(39,4,-49,3,2.2,0);this.windowGlass(47,4,-49,3,2.2,0);
-    // Trees in pockets
-    [[-57,-12,.9],[-12,-48,1.05],[13,-55,.82],[54,-14,.95],[-57,19,.8],[20,58,1.05],[57,31,.95],[-4,56,.8]].forEach(v=>this.tree(...v));
-    [[-28,-25,.9],[-13,25,.75],[27,-12,1.05],[28,28,.72]].forEach(v=>this.rock(...v));
-    this.stairs(24,7,6,8,.36,.62,Math.PI/2);
+    blocks.forEach((b,i)=>{const[x,z,w,d,h]=b;this.box(x,h/2,z,w,h,d,i%2?0x4d575c:0x414b50);this.box(x+(i%2?2:-2),h+.7,z-.8,2,.9,2,0x323b3e)});
+    for(let i=0;i<18;i++){const x=((i*23)%100)-50,z=((i*41)%100)-50;if(Math.abs(x)<12&&Math.abs(z)<12)continue;this.box(x,.65,z,3.8,1.3,1.0,i%2?0x3c474b:0x58615f)}
+    this.door(-45,0,-33,2.2,3.2);this.door(42,0,-34,2.5,3.2);this.windowGlass(-41,4,-50,3,2.2);this.windowGlass(-49,4,-50,3,2.2);this.windowGlass(39,4,-49,3,2.2);this.windowGlass(47,4,-49,3,2.2);
+    [[-57,-12,.9],[-12,-48,1.05],[13,-55,.82],[54,-14,.95],[-57,19,.8],[20,58,1.05],[57,31,.95],[-4,56,.8]].forEach(v=>this.tree(...v));[[-28,-25,.9],[-13,25,.75],[27,-12,1.05],[28,28,.72]].forEach(v=>this.rock(...v));this.stairs(24,7,6,8,.36,.62,Math.PI/2);
   }
 
   buildMountain(){
-    // Layered ridge terrain; flattened geometry is kept intentionally light for iPad A16.
-    const ridgeMat=new THREE.MeshStandardMaterial({color:0x5e6e5a,roughness:1});
-    for(let i=0;i<18;i++){
-      const x=(i%6)*22-55,z=Math.floor(i/6)*30-45;
-      const h=2.5+((i*9)%8)*1.6;
-      const o=new THREE.Mesh(new THREE.ConeGeometry(11+h, h*2.2, 6),ridgeMat);
-      o.position.set(x,h/2-.2,z);o.rotation.y=i*.47;o.scale.z=1.65;o.castShadow=true;o.receiveShadow=true;this.mapGroup.add(o);
-    }
-    // Rocky ledges / cover
-    for(let i=0;i<22;i++){
-      const x=(i*19%116)-58,z=(i*37%120)-60,s=.8+((i*11)%9)/10;
-      this.rock(x,z,s,0x606a63);
-    }
-    for(let i=0;i<30;i++){
-      const x=(i*31%120)-60,z=(i*17%120)-60,s=.72+((i*7)%6)/9;this.tree(x,z,s);
-    }
-    // Small observation shelter with stairs and glass
-    this.box(0,2,-7,10,4,7,0x424c4c);
-    this.box(0,4.25,-7,10,.5,7,0x2f383a);
-    this.windowGlass(-2.6,2.2,-10.55,2.8,1.9,0);this.windowGlass(2.6,2.2,-10.55,2.8,1.9,0);
-    this.door(0,0,-10.55,2.2,3.0,0);this.stairs(0,-15,5,7,.35,.6,0);
+    for(let i=0;i<46;i++){const x=(i*31%190)-95,z=(i*47%210)-105;if(Math.hypot(x,z)<14)continue;this.tree(x,z,.72+((i*7)%7)*.08)}
+    for(let i=0;i<30;i++){const x=(i*23%190)-95,z=(i*37%210)-105;if(Math.hypot(x,z)<12)continue;this.rock(x,z,.6+((i*5)%7)*.12,0x626b63)}
+    this.box(0,this.groundHeightAt(0,-14)+2,-14,10,4,7,0x424c4c);this.box(0,this.groundHeightAt(0,-14)+4.25,-14,10,.5,7,0x2f383a);this.windowGlass(-2.6,2.2+this.groundHeightAt(0,-14),-17.55,2.8,1.9);this.windowGlass(2.6,2.2+this.groundHeightAt(0,-14),-17.55,2.8,1.9);this.door(0,this.groundHeightAt(0,-14),-17.55,2.2,3);this.stairs(0,-22,5,8,.35,.6,0);
   }
 
   buildInterior(){
-    // Warehouse-like facility: corridors, multiple rooms, a mezzanine, doors and glass.
-    const walls=0x454e52,accent=0x555f63;
-    this.box(0,.18,0,54,.36,54,0x252c2f,{collider:false});
-    // Outer shell
-    this.box(0,3,-27,54,6,.7,walls);this.box(0,3,27,54,6,.7,walls);
-    this.box(-27,3,0,.7,6,54,walls);this.box(27,3,0,.7,6,54,walls);
-    // Internal rooms / corridors with deliberate openings
-    [[-13,-13], [13,-13],[-13,13],[13,13]].forEach(([x,z])=>{
-      this.box(x,3,z-7,20,6,.55,walls);this.box(x,3,z+7,20,6,.55,walls);
-      this.box(x-10,3,z,.55,6,14,walls);this.box(x+10,3,z,.55,6,14,walls);
-    });
-    // Central mezzanine and stair block
-    this.box(0,3,0,10,.45,14,accent,{collider:false});
-    this.stairs(0,-3,4,9,.38,.58,Math.PI/2,accent);
-    this.stairs(0,10,4,9,.38,.58,-Math.PI/2,accent);
-    // Doors
-    this.door(-13,0,-20,2.4,3.1,0);this.door(13,0,-20,2.4,3.1,0);
-    this.door(-13,0,20,2.4,3.1,Math.PI);this.door(13,0,20,2.4,3.1,Math.PI);
-    // Large breakable observation windows
-    [-13,0,13].forEach(x=>this.windowGlass(x,3,-26.62,4.6,2.5,0));
-    [-13,0,13].forEach(x=>this.windowGlass(x,4.2,26.62,4.2,1.9,Math.PI));
-    // Crates / cover
-    for(let i=0;i<28;i++){
-      const x=(i%7)*6-18,z=Math.floor(i/7)*6-18;
-      this.box(x,.7,z,1.8,1.4,1.8,i%3===0?0x56504a:0x3b4548);
-    }
-    // Ceiling lamps (visual only)
-    for(let x=-18;x<=18;x+=12)for(let z=-18;z<=18;z+=12){
-      const lamp=new THREE.Mesh(new THREE.BoxGeometry(2.4,.08,.5),new THREE.MeshBasicMaterial({color:0xdfeeea}));lamp.position.set(x,5.7,z);this.mapGroup.add(lamp);
-    }
+    const walls=0x454e52,accent=0x555f63;this.box(0,.18,0,54,.36,54,0x252c2f,{collider:false});this.box(0,3,-27,54,6,.7,walls);this.box(0,3,27,54,6,.7,walls);this.box(-27,3,0,.7,6,54,walls);this.box(27,3,0,.7,6,54,walls);
+    [[-13,-13],[13,-13],[-13,13],[13,13]].forEach(([x,z])=>{this.box(x,3,z-7,20,6,.55,walls);this.box(x,3,z+7,20,6,.55,walls);this.box(x-10,3,z,.55,6,14,walls);this.box(x+10,3,z,.55,6,14,walls)});
+    this.box(0,3,0,10,.45,14,accent,{collider:false});this.stairs(0,-3,4,9,.38,.58,Math.PI/2,accent);this.stairs(0,10,4,9,.38,.58,-Math.PI/2,accent);
+    this.door(-13,0,-20,2.4,3.1);this.door(13,0,-20,2.4,3.1);this.door(-13,0,20,2.4,3.1,Math.PI);this.door(13,0,20,2.4,3.1,Math.PI);
+    [-13,0,13].forEach(x=>this.windowGlass(x,3,-26.62,4.6,2.5));[-13,0,13].forEach(x=>this.windowGlass(x,4.2,26.62,4.2,1.9,Math.PI));
+    for(let i=0;i<28;i++){const x=(i%7)*6-18,z=Math.floor(i/7)*6-18;this.box(x,.7,z,1.8,1.4,1.8,i%3===0?0x56504a:0x3b4548)}
+    for(let x=-18;x<=18;x+=12)for(let z=-18;z<=18;z+=12){const lamp=new THREE.Mesh(new THREE.BoxGeometry(2.4,.08,.5),new THREE.MeshBasicMaterial({color:0xe1f2eb}));lamp.position.set(x,5.7,z);this.mapGroup.add(lamp)}
   }
+  addDistantSilhouette(){const mat=new THREE.MeshStandardMaterial({color:state.map==='mountain'?0x526958:0x5d746f,roughness:1});for(let i=0;i<18;i++){const h=8+((i*17)%11)*2,o=new THREE.Mesh(new THREE.BoxGeometry(8,h,6),mat);o.position.set((i-9)*18,h/2-.1,-105-(i%3)*12);o.castShadow=false;this.mapGroup.add(o)}}
 
-  addDistantSilhouette(){
-    // Very low-cost far skyline / ridgeline to avoid an empty horizon.
-    const mat=new THREE.MeshStandardMaterial({color:0x5d746f,roughness:1});
-    const g=new THREE.Group();
-    for(let i=0;i<18;i++){
-      const h=8+((i*17)%11)*2;const o=new THREE.Mesh(new THREE.BoxGeometry(8,h,6),mat);
-      o.position.set((i-9)*18,h/2-0.1,-105-(i%3)*12);o.castShadow=false;g.add(o);
-    }
-    this.mapGroup.add(g);
-  }
-
-  spawnDrones(n){
+  spawnHumans(n){
     for(let i=0;i<n;i++){
-      const g=new THREE.Group();
-      const core=new THREE.Mesh(new THREE.SphereGeometry(.38,12,12),new THREE.MeshStandardMaterial({color:0x9ee7dc,emissive:0x184c45,emissiveIntensity:2}));g.add(core);
-      const ring=new THREE.Mesh(new THREE.TorusGeometry(.55,.06,8,20),new THREE.MeshStandardMaterial({color:0xd9ff5f,emissive:0x3c510f,emissiveIntensity:1.5}));ring.rotation.x=Math.PI/2;g.add(ring);
-      g.position.set((i*13%50)-25,1.4+(i%3)*.5,(i*31%50)-25);this.mapGroup.add(g);this.botMeshes.push({mesh:g,origin:g.position.clone(),phase:i*1.7});
+      const g=new THREE.Group();const baseX=(i*29%105)-52,baseZ=(i*47%105)-52;const y=this.groundHeightAt(baseX,baseZ);
+      const suit=new THREE.MeshStandardMaterial({color:i%2?0x42514b:0x363e43,roughness:.9});const vest=new THREE.MeshStandardMaterial({color:0x1f272b,roughness:.85});const skin=new THREE.MeshStandardMaterial({color:0x9d806c,roughness:.9});
+      const pelvis=new THREE.Mesh(new THREE.BoxGeometry(.55,.32,.32),vest);pelvis.position.y=.95;g.add(pelvis);
+      const torso=new THREE.Mesh(new THREE.BoxGeometry(.82,1.08,.42),suit);torso.position.y=1.55;torso.castShadow=true;g.add(torso);
+      const head=new THREE.Mesh(new THREE.SphereGeometry(.25,12,10),skin);head.position.y=2.35;head.userData.hitPart='head';g.add(head);
+      const helmet=new THREE.Mesh(new THREE.SphereGeometry(.27,12,8,0,Math.PI*2,0,Math.PI*.62),vest);helmet.position.y=2.45;g.add(helmet);
+      const makeLimb=(x,y,z,sx,sy,sz,mat,rot=0)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),mat);m.position.set(x,y,z);m.rotation.z=rot;g.add(m);return m};
+      makeLimb(-.56,1.52,0,.22,.95,.22,suit,.08);makeLimb(.56,1.52,0,.22,.95,.22,suit,-.08);makeLimb(-.22,.42,0,.27,1.0,.27,suit,.03);makeLimb(.22,.42,0,.27,1.0,.27,suit,-.03);
+      g.traverse(o=>{if(o.isMesh)o.userData.enemyId=i;if(o.isMesh&&!o.userData.hitPart)o.userData.hitPart='body'});
+      g.position.set(baseX,y,baseZ);this.mapGroup.add(g);this.enemies.push({group:g,origin:new THREE.Vector3(baseX,y,baseZ),phase:i*.8,hp:100,alive:true,respawn:0});
     }
   }
 
   breakNearestGlass(){
-    if(!this.breakableGlass?.length)return;
-    let best=null,bestD=3.2;
-    const forward=new THREE.Vector3();this.camera.getWorldDirection(forward);
-    const ray=new THREE.Raycaster(this.camera.position,forward,0.1,4.0);
-    const hits=ray.intersectObjects(this.breakableGlass,false);
-    if(hits.length) best=hits[0].object;
-    if(best){
-      this.breakableGlass=this.breakableGlass.filter(o=>o!==best);
-      best.userData.broken=true;
-      best.visible=false;
-      best.geometry?.dispose?.();best.material?.dispose?.();
-      // brief non-graphic sparkle feedback
-      const ping=new THREE.Mesh(new THREE.RingGeometry(.15,.24,10),new THREE.MeshBasicMaterial({color:0xd9ff5f,transparent:true,opacity:.8,side:THREE.DoubleSide}));
-      ping.position.copy(best.position);this.mapGroup.add(ping);let life=0;const tick=()=>{life+=.04;ping.scale.setScalar(1+life*3);ping.material.opacity=.8-life*1.6;if(life<.5)requestAnimationFrame(tick);else{this.mapGroup.remove(ping);ping.geometry.dispose();ping.material.dispose();}};tick();
-    }
+    const ray=new THREE.Raycaster(this.camera.position,this.getAimDirection(),.1,5);const hits=ray.intersectObjects(this.breakableGlass,false);if(!hits.length)return;const best=hits[0].object;this.breakableGlass=this.breakableGlass.filter(o=>o!==best);best.visible=false;
+    const ring=new THREE.Mesh(new THREE.RingGeometry(.15,.24,10),new THREE.MeshBasicMaterial({color:0xd9ff5f,transparent:true,opacity:.8,side:THREE.DoubleSide,depthWrite:false}));ring.position.copy(hits[0].point);ring.lookAt(this.camera.position);this.mapGroup.add(ring);setTimeout(()=>{this.mapGroup.remove(ring);ring.geometry.dispose();ring.material.dispose()},400);
   }
 
+  getAimDirection(){const d=new THREE.Vector3(0,0,-1);d.applyQuaternion(this.camera.quaternion).normalize();return d}
+
   addHands(){
-    this.handGroup=new THREE.Group();const skin=new THREE.MeshStandardMaterial({color:0xb58f79,roughness:.75});const glove=new THREE.MeshStandardMaterial({color:0x1e262b,roughness:.92});
-    const arm1=new THREE.Mesh(new THREE.CylinderGeometry(.10,.13,.72,10),glove);arm1.rotation.z=-.30;arm1.position.set(-.32,-.30,-.48);this.handGroup.add(arm1);
-    const arm2=new THREE.Mesh(new THREE.CylinderGeometry(.10,.13,.72,10),glove);arm2.rotation.z=.30;arm2.position.set(.32,-.30,-.48);this.handGroup.add(arm2);
-    const hand1=new THREE.Mesh(new THREE.SphereGeometry(.14,10,10),skin);hand1.position.set(-.23,-.47,-.63);this.handGroup.add(hand1);const hand2=hand1.clone();hand2.position.x=.23;this.handGroup.add(hand2);
-    this.camera.add(this.handGroup);this.scene.add(this.camera);this.handGroup.visible=state.settings.hands;
+    this.handGroup=new THREE.Group();const glove=new THREE.MeshStandardMaterial({color:0x1b2226,roughness:.95});const sleeve=new THREE.MeshStandardMaterial({color:0x303a3f,roughness:1});const skin=new THREE.MeshStandardMaterial({color:0x9e806e,roughness:.9});
+    const armL=new THREE.Mesh(new THREE.CylinderGeometry(.105,.14,.72,10),sleeve);armL.rotation.z=-.24;armL.position.set(-.34,-.32,-.53);this.handGroup.add(armL);
+    const armR=new THREE.Mesh(new THREE.CylinderGeometry(.105,.14,.74,10),sleeve);armR.rotation.z=.30;armR.position.set(.36,-.35,-.48);this.handGroup.add(armR);
+    const gloveL=new THREE.Mesh(new THREE.BoxGeometry(.20,.24,.30),glove);gloveL.rotation.z=-.10;gloveL.position.set(-.25,-.60,-.82);this.handGroup.add(gloveL);
+    const gloveR=new THREE.Mesh(new THREE.BoxGeometry(.20,.25,.29),glove);gloveR.rotation.z=.08;gloveR.position.set(.24,-.58,-.62);this.handGroup.add(gloveR);
+    const fingers=new THREE.Mesh(new THREE.SphereGeometry(.105,10,8),skin);fingers.visible=false;this.handGroup.add(fingers);
+    this.camera.add(this.handGroup);this.handGroup.visible=state.settings.hands;
   }
-  addWeapon(){
-    this.weaponGroup=new THREE.Group();
-    const dark=new THREE.MeshStandardMaterial({color:0x121619,roughness:.58,metalness:.25});
-    const matte=new THREE.MeshStandardMaterial({color:0x2b3236,roughness:.82});
-    const glass=new THREE.MeshStandardMaterial({color:0x61767d,roughness:.25,metalness:.1,transparent:true,opacity:.9});
-    const receiver=new THREE.Mesh(new THREE.BoxGeometry(.34,.24,1.12),dark);receiver.position.set(.10,-.35,-.76);this.weaponGroup.add(receiver);
-    const barrel=new THREE.Mesh(new THREE.CylinderGeometry(.045,.055,.75,12),dark);barrel.rotation.x=Math.PI/2;barrel.position.set(.10,-.34,-1.65);this.weaponGroup.add(barrel);
-    const muzzle=new THREE.Mesh(new THREE.CylinderGeometry(.065,.065,.14,12),matte);muzzle.rotation.x=Math.PI/2;muzzle.position.set(.10,-.34,-2.03);this.weaponGroup.add(muzzle);
-    const grip=new THREE.Mesh(new THREE.BoxGeometry(.16,.45,.18),dark);grip.rotation.x=-.18;grip.position.set(.18,-.57,-.52);this.weaponGroup.add(grip);
-    const stock=new THREE.Mesh(new THREE.BoxGeometry(.21,.20,.48),matte);stock.position.set(.10,-.37,-.02);this.weaponGroup.add(stock);
-    const opticBase=new THREE.Mesh(new THREE.BoxGeometry(.18,.06,.30),matte);opticBase.position.set(.10,-.18,-.74);this.weaponGroup.add(opticBase);
-    const optic=new THREE.Mesh(new THREE.BoxGeometry(.11,.12,.22),glass);optic.position.set(.10,-.11,-.82);this.weaponGroup.add(optic);
-    const rail=new THREE.Mesh(new THREE.BoxGeometry(.17,.035,.75),matte);rail.position.set(.10,-.20,-.82);this.weaponGroup.add(rail);
-    this.muzzleFlash=new THREE.Mesh(new THREE.ConeGeometry(.12,.35,8),new THREE.MeshBasicMaterial({color:0xffe9a8,transparent:true,opacity:0,depthWrite:false}));this.muzzleFlash.rotation.x=-Math.PI/2;this.muzzleFlash.position.set(.10,-.34,-2.20);this.weaponGroup.add(this.muzzleFlash);
-    this.weaponGroup.position.set(.04,.02,.00);this.weaponGroup.rotation.set(0,0,0);this.camera.add(this.weaponGroup);
+
+  addWeapon(){this.weaponGroup=new THREE.Group();this.updateWeaponModel();this.camera.add(this.weaponGroup)}
+  updateWeaponModel(){
+    if(!this.weaponGroup)return;
+    for(const c of [...this.weaponGroup.children]){c.geometry?.dispose?.();if(c.material)c.material.dispose?.();this.weaponGroup.remove(c)}
+    if(this.currentWeaponType==='melee'){
+      const m=new THREE.MeshStandardMaterial({color:0x24292c,roughness:.5,metalness:.5});const blade=new THREE.Mesh(new THREE.BoxGeometry(.09,.48,.06),m);blade.position.set(.12,-.30,-.72);blade.rotation.z=-.18;this.weaponGroup.add(blade);return;
+    }
+    const name=this.currentWeaponType==='primary'?state.primary:state.secondary;const data=(this.currentWeaponType==='primary'?WEAPONS.primary:WEAPONS.secondary)[name]||WEAPONS.primary.M4A1;const dark=new THREE.MeshStandardMaterial({color:data.color,roughness:.55,metalness:.28});const matte=new THREE.MeshStandardMaterial({color:0x343b3e,roughness:.85});
+    const receiver=new THREE.Mesh(new THREE.BoxGeometry(.37,.26,1.03),dark);receiver.position.set(.12,-.37,-.86);this.weaponGroup.add(receiver);
+    const handguard=new THREE.Mesh(new THREE.BoxGeometry(.31,.20,.78),matte);handguard.position.set(.12,-.32,-1.65);this.weaponGroup.add(handguard);
+    const barrel=new THREE.Mesh(new THREE.CylinderGeometry(.042,.055,.72,14),dark);barrel.rotation.x=Math.PI/2;barrel.position.set(.12,-.33,-2.08);this.weaponGroup.add(barrel);
+    const muzzle=this.buildMuzzle(state.muzzle);muzzle.position.set(.12,-.33,-2.44);this.weaponGroup.add(muzzle);
+    const grip=new THREE.Mesh(new THREE.BoxGeometry(.17,.47,.19),dark);grip.rotation.x=-.18;grip.position.set(.20,-.59,-.61);this.weaponGroup.add(grip);
+    const stock=this.buildStock(state.stock);stock.position.set(.12,-.38,-.12);this.weaponGroup.add(stock);
+    const rail=new THREE.Mesh(new THREE.BoxGeometry(.18,.035,.62),matte);rail.position.set(.12,-.17,-1.06);this.weaponGroup.add(rail);
+    const sight=this.buildSight(state.sight);sight.position.set(.12,-.095,-1.13);this.weaponGroup.add(sight);this.weaponSight=sight;
+    this.muzzleFlash=new THREE.Mesh(new THREE.ConeGeometry(.11,.34,8),new THREE.MeshBasicMaterial({color:0xffe9a8,transparent:true,opacity:0,depthWrite:false}));this.muzzleFlash.rotation.x=-Math.PI/2;this.muzzleFlash.position.set(.12,-.33,-2.58);this.weaponGroup.add(this.muzzleFlash);
+    this.weaponGroup.position.set(.02,.015,0);
   }
+  buildMuzzle(v){const g=new THREE.Group();const m=new THREE.MeshStandardMaterial({color:0x202628,roughness:.6,metalness:.35});if(v==='コンペンセータ')g.add(new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,.18,12),m));else if(v==='静音モジュール'){const a=new THREE.Mesh(new THREE.CylinderGeometry(.075,.075,.32,14),m);a.rotation.x=Math.PI/2;g.add(a)}else{const a=new THREE.Mesh(new THREE.CylinderGeometry(.06,.06,.12,12),m);a.rotation.x=Math.PI/2;g.add(a)}for(const c of g.children){c.rotation.x=Math.PI/2;}return g}
+  buildStock(v){const m=new THREE.MeshStandardMaterial({color:0x2a3032,roughness:.8});if(v==='軽量')return new THREE.Mesh(new THREE.BoxGeometry(.18,.17,.42),m);if(v==='安定')return new THREE.Mesh(new THREE.BoxGeometry(.23,.23,.55),m);return new THREE.Mesh(new THREE.BoxGeometry(.20,.19,.50),m)}
+  buildSight(v){const g=new THREE.Group();const body=new THREE.MeshStandardMaterial({color:0x202628,roughness:.45,metalness:.3});if(v==='ドットサイト'){const base=new THREE.Mesh(new THREE.BoxGeometry(.16,.06,.25),body);base.position.y=.01;g.add(base);const frame=new THREE.Mesh(new THREE.BoxGeometry(.13,.14,.18),body);frame.position.y=.08;g.add(frame);const lens=new THREE.Mesh(new THREE.BoxGeometry(.07,.07,.018),new THREE.MeshBasicMaterial({color:0xb9d9e0,transparent:true,opacity:.72}));lens.position.set(0,.08,-.095);g.add(lens);const dot=new THREE.Mesh(new THREE.SphereGeometry(.012,8,8),new THREE.MeshBasicMaterial({color:0xff3344}));dot.position.set(0,.08,-.108);g.add(dot)}else if(v==='ホロ'){const frame=new THREE.Mesh(new THREE.BoxGeometry(.18,.15,.20),body);g.add(frame)}else{const rail=new THREE.Mesh(new THREE.BoxGeometry(.17,.045,.23),body);g.add(rail)}return g}
+
   fire(){
-    if(this.fireCooldown>0)return; this.fireCooldown=.13; this.weaponKick=.06;
-    this.playShotSound();
-    if(this.muzzleFlash){this.muzzleFlash.material.opacity=.95;setTimeout(()=>{if(this.muzzleFlash)this.muzzleFlash.material.opacity=0},45)}
+    if(!this.running||this.paused||this.reloading||this.inspecting)return;
+    if(this.currentWeaponType==='melee'){if(this.fireCooldown>0)return;this.fireCooldown=.45;this.weaponKick=.12;this.playShotSound('melee');return;}
+    const mag=this.magAmmo[this.currentWeaponType]||0;if(mag<=0){this.startReload();return;}if(this.fireCooldown>0)return;
+    const name=this.currentWeaponType==='primary'?state.primary:state.secondary,data=(this.currentWeaponType==='primary'?WEAPONS.primary:WEAPONS.secondary)[name];
+    this.fireCooldown=data.rate;this.magAmmo[this.currentWeaponType]--;this.weaponKick=.065;this.playShotSound('shot');
+    if(this.muzzleFlash){this.muzzleFlash.material.opacity=.92;setTimeout(()=>{if(this.muzzleFlash)this.muzzleFlash.material.opacity=0},35)}
+    const origin=this.camera.position.clone();const dir=this.getAimDirection();const tracerEnd=origin.clone().addScaledVector(dir,75);const ray=new THREE.Raycaster(origin,dir,.1,75);
+    const targets=[];this.mapGroup.traverse(o=>{if(o.isMesh&&o.userData.enemyId!==undefined&&o.parent?.visible!==false)targets.push(o)});const hits=ray.intersectObjects(targets,false);let hitPoint=tracerEnd;let hitNormal=null;
+    if(hits.length){hitPoint=hits[0].point;hitNormal=hits[0].face?.normal||null;const enemy=this.enemies[hits[0].object.userData.enemyId];if(enemy&&enemy.alive){const dmg=hits[0].object.userData.hitPart==='head'?Math.max(70,data.damage+25):data.damage;enemy.hp=Math.max(0,enemy.hp-dmg);if(enemy.hp<=0){enemy.alive=false;enemy.respawn=3.5;enemy.group.visible=false;}}}
+    if(hits.length===0){const worldHits=ray.intersectObjects(this.colliders.map(c=>c.object).filter(Boolean),false);if(worldHits.length){hitPoint=worldHits[0].point;hitNormal=worldHits[0].face?.normal||null;this.createBulletHole(hitPoint,hitNormal)}}
+    this.createTracer(origin,hitPoint);
+    this.updateHUD();
   }
-  playShotSound(){
-    try{
-      this.audioCtx??=new (window.AudioContext||window.webkitAudioContext)();
-      if(this.audioCtx.state==='suspended')this.audioCtx.resume();
-      const t=this.audioCtx.currentTime;const osc=this.audioCtx.createOscillator();const gain=this.audioCtx.createGain();
-      osc.type='square';osc.frequency.setValueAtTime(150,t);osc.frequency.exponentialRampToValueAtTime(70,t+.09);gain.gain.setValueAtTime(.001,t);gain.gain.exponentialRampToValueAtTime(.18,t+.005);gain.gain.exponentialRampToValueAtTime(.001,t+.12);osc.connect(gain).connect(this.audioCtx.destination);osc.start(t);osc.stop(t+.13);
-    }catch{}
+  createTracer(a,b){const g=new THREE.BufferGeometry().setFromPoints([a,b]);const line=new THREE.Line(g,new THREE.LineBasicMaterial({color:0xffeeb0,transparent:true,opacity:.8,depthWrite:false}));this.scene.add(line);setTimeout(()=>{this.scene.remove(line);g.dispose();line.material.dispose()},65)}
+  createBulletHole(point,normal){const mat=new THREE.MeshBasicMaterial({color:0x161a1a,transparent:true,opacity:.86,depthWrite:false,side:THREE.DoubleSide});const hole=new THREE.Mesh(new THREE.CircleGeometry(.055,10),mat);hole.position.copy(point);if(normal)hole.lookAt(point.clone().add(normal));this.scene.add(hole);const obj={mesh:hole,ttl:15};this.bulletHoles.push(obj);}
+
+  startReload(){
+    if(this.currentWeaponType==='melee'||this.reloading||this.magAmmo[this.currentWeaponType]>=this.getCurrentMagSize()||this.reserveAmmo[this.currentWeaponType]<=0)return;
+    this.reloading=true;this.firing=false;this.reloadTimer=(this.currentWeaponType==='primary'?WEAPONS.primary[state.primary]:WEAPONS.secondary[state.secondary]).reload;
   }
+  startInspect(){if(!this.running||this.reloading||this.inspecting||this.currentWeaponType==='melee')return;this.inspecting=true;this.inspectTimer=1.8;this.firing=false;document.getElementById('game-ui').classList.add('hud-hidden');}
+  useMedkit(){if(this.health>=100)return;this.health=Math.min(100,this.health+35);this.updateHUD();}
+  getCurrentMagSize(){if(this.currentWeaponType==='melee')return 0;const data=(this.currentWeaponType==='primary'?WEAPONS.primary:WEAPONS.secondary)[this.currentWeaponType==='primary'?state.primary:state.secondary];return data?.mag||30}
+  playShotSound(kind){try{this.audioCtx??=new(window.AudioContext||window.webkitAudioContext)();if(this.audioCtx.state==='suspended')this.audioCtx.resume();const t=this.audioCtx.currentTime,o=this.audioCtx.createOscillator(),g=this.audioCtx.createGain();o.type=kind==='melee'?'triangle':'square';o.frequency.setValueAtTime(kind==='melee'?90:150,t);o.frequency.exponentialRampToValueAtTime(kind==='melee'?55:70,t+.09);g.gain.setValueAtTime(.001,t);g.gain.exponentialRampToValueAtTime(kind==='melee'?.05:.16,t+.004);g.gain.exponentialRampToValueAtTime(.001,t+.12);o.connect(g).connect(this.audioCtx.destination);o.start(t);o.stop(t+.13)}catch{}}
+
   update(dt){
     if(!this.running||this.paused)return;
     this.controls.pointerSpeed=state.settings.sensitivity;
     if(state.settings.dashMode==='hold')this.dash=!!(this.keys.ControlLeft||this.keys.ControlRight);
-    if(state.settings.crouchMode==='hold')this.crouch=!!(this.keys.ShiftLeft||this.keys.ShiftRight);
-    const forward=(this.keys.KeyW?1:0)-(this.keys.KeyS?1:0),right=(this.keys.KeyD?1:0)-(this.keys.KeyA?1:0);const moving=forward!==0||right!==0;
-    if(this.dash&&moving&&!this.crouch)this.stamina=Math.max(0,this.stamina-dt*21);else this.stamina=Math.min(100,this.stamina+dt*13);if(this.stamina<5)this.dash=false;
-    let speed=this.dash?8.2:4.1;if(this.crouch)speed*=.53;if(this.dash&&this.crouch){this.slide=Math.min(1,this.slide+dt*4);speed=9.2}else this.slide=Math.max(0,this.slide-dt*4);
-    const len=Math.hypot(forward,right)||1,f=forward/len,r=right/len;this.controls.getDirection(_dir);_dir.y=0;_dir.normalize();const side=new THREE.Vector3().crossVectors(_dir,this.camera.up).normalize();const wish=_dir.multiplyScalar(f).add(side.multiplyScalar(r)).multiplyScalar(speed);
-    this.velocity.x=THREE.MathUtils.damp(this.velocity.x,wish.x,14,dt);this.velocity.z=THREE.MathUtils.damp(this.velocity.z,wish.z,14,dt);this.velocity.y-=18*dt;
-    const pos=this.camera.position,nx=pos.x+this.velocity.x*dt,nz=pos.z+this.velocity.z*dt;let blocked=false;for(const c of this.colliders)if(c.type==='box'&&nx>c.minX-.35&&nx<c.maxX+.35&&nz>c.minZ-.35&&nz<c.maxZ+.35){blocked=true;break}if(!blocked){pos.x=nx;pos.z=nz}
-    if(pos.y+this.velocity.y*dt<=(this.crouch?1.02:1.72)){pos.y=this.crouch?1.02:1.72;this.velocity.y=0;this.canJump=true}else pos.y+=this.velocity.y*dt;
-    this.lean=THREE.MathUtils.lerp(this.lean,(this.keys.KeyQ?-0.16:0)+(this.keys.KeyE?0.16:0),Math.min(1,dt*12));
-    const bob=moving?Math.sin(performance.now()*.008*(this.dash?1.7:1))*.018:0;const shake=this.dash?Math.sin(performance.now()*.035)*state.settings.shake*.008:0;
-    this.camera.rotation.z=this.lean;this.camera.position.y+=((this.crouch?1.02:1.72)+bob+shake-this.camera.position.y)*Math.min(1,dt*12);
-    if(this.weaponGroup){this.weaponGroup.visible=true;this.weaponGroup.position.x=this.lean*.42;this.weaponGroup.position.y=(this.crouch?-.11:0)+bob*.75;this.weaponGroup.rotation.z=-this.lean*.42;this.weaponGroup.rotation.x=this.weaponKick;this.weaponKick=THREE.MathUtils.damp(this.weaponKick,0,18,dt)}
-    if(this.handGroup){this.handGroup.visible=state.settings.hands;this.handGroup.position.y=(this.crouch?-.1:0)+bob*.7;this.handGroup.position.x=this.lean*1.2;}
-    this.botMeshes.forEach(b=>{b.mesh.position.x=b.origin.x+Math.sin(performance.now()*.0004+b.phase)*3;b.mesh.position.z=b.origin.z+Math.cos(performance.now()*.00033+b.phase)*3;b.mesh.rotation.y+=dt});
-    this.fireCooldown=Math.max(0,this.fireCooldown-dt);
-    this.ping=Math.round(18+Math.sin(performance.now()*.0007)*5+Math.random()*5);this.packetLoss=Math.random()<.035?Number((Math.random()*.7).toFixed(1)):0;
-    document.getElementById('stance').textContent=this.crouch?(this.dash?'スライド':'しゃがみ'):'立ち';document.getElementById('drive').textContent=this.dash?'ダッシュ':moving?'歩行':'停止';document.getElementById('hud-state').textContent=this.dash?'高速移動':this.slide>0?'スライド':'準備完了';
-    document.getElementById('ping').textContent=`${this.ping} ms`;document.getElementById('packet-loss').textContent=`${this.packetLoss.toFixed(1)} %`;this.updateHealth();this.updateDebug();
+    if(state.settings.crouchMode==='hold'&&!this.isSliding())this.crouch=!!(this.keys.ShiftLeft||this.keys.ShiftRight);
+    const moving=this.isMoving();
+    if(!moving&&this.dash)this.dash=false; // stop sprint when movement stops
+    if(this.dash&&moving&&!this.crouch&&!this.isSliding())this.stamina=Math.max(0,this.stamina-dt*23);else this.stamina=Math.min(100,this.stamina+dt*14);if(this.stamina<6)this.dash=false;
+    if(this.slideTimer>0){this.slideTimer=Math.max(0,this.slideTimer-dt);if(this.slideTimer===0)this.dash=false;this.crouch=false}
+    let speed=this.isSliding()?10.0:(this.dash?8.4:4.4);if(this.crouch)speed*=.54;
+    let f=(this.keys.KeyW?1:0)-(this.keys.KeyS?1:0),r=(this.keys.KeyD?1:0)-(this.keys.KeyA?1:0);const len=Math.hypot(f,r)||1;f/=len;r/=len;
+    const yaw=this.camera.rotation.y;const forward=new THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));const side=new THREE.Vector3(Math.cos(yaw),0,Math.sin(yaw));const wish=forward.multiplyScalar(f).add(side.multiplyScalar(r)).multiplyScalar(speed);
+    this.velocity.x=THREE.MathUtils.damp(this.velocity.x,wish.x,14,dt);this.velocity.z=THREE.MathUtils.damp(this.velocity.z,wish.z,14,dt);
+    const nx=this.playerPos.x+this.velocity.x*dt,nz=this.playerPos.z+this.velocity.z*dt;let blocked=false;for(const c of this.colliders){if(nx>c.minX-.38&&nx<c.maxX+.38&&nz>c.minZ-.38&&nz<c.maxZ+.38){blocked=true;break}}if(!blocked){this.playerPos.x=nx;this.playerPos.z=nz}
+    const ground=this.groundHeightAt(this.playerPos.x,this.playerPos.z);const stance=this.isSliding()?1.08:(this.crouch?1.08:1.72);
+    this.velocity.y-=18*dt;const targetGround=ground+stance;
+    if(this.camera.position.y+this.velocity.y*dt<=targetGround){this.camera.position.y=targetGround;this.velocity.y=0;this.canJump=true}else{this.camera.position.y+=this.velocity.y*dt;this.canJump=false}
+    this.updateCameraTransform(dt);
+
+    if(this.firing && (this.currentWeaponType==='primary'||this.currentWeaponType==='secondary'))this.fire();
+    if(this.fireCooldown>0)this.fireCooldown=Math.max(0,this.fireCooldown-dt);
+    if(this.reloading){this.reloadTimer-=dt;if(this.reloadTimer<=0){const need=this.getCurrentMagSize()-this.magAmmo[this.currentWeaponType],take=Math.min(need,this.reserveAmmo[this.currentWeaponType]);this.magAmmo[this.currentWeaponType]+=take;this.reserveAmmo[this.currentWeaponType]-=take;this.reloading=false;}}
+    if(this.inspecting){this.inspectTimer-=dt;if(this.inspectTimer<=0){this.inspecting=false;document.getElementById('game-ui').classList.remove('hud-hidden')}}
+    this.updateWeaponAnimation(dt,moving);
+    this.updateEnemies(dt);
+    this.updateEffects(dt);
+    this.ping=Math.round(18+Math.sin(performance.now()*.0007)*5+Math.random()*5);this.packetLoss=Math.random()<.028?Number((Math.random()*.7).toFixed(1)):0;
+    this.updateHUD();this.updateDebug();
   }
-  updateHotbar(){
-    document.querySelectorAll('#hotbar .slot').forEach((el,i)=>{el.classList.toggle('active',i+1===this.selectedSlot)})
-    const names=['スキャナー','タブレット','カメラ','ビーコン','無線','センサー','救急キット','ツールキット','バッテリー','空'];
-    const tool=names[this.selectedSlot-1]||'スキャナー';document.getElementById('tool-hud').textContent=tool;
+
+  updateCameraTransform(dt){
+    const bob=this.isMoving()?Math.sin(performance.now()*.008*(this.dash?1.7:1))*.025:0;const shake=this.dash?Math.sin(performance.now()*.035)*state.settings.shake*.010:0;const leanTarget=this.keys.KeyQ?-1:(this.keys.KeyE?1:0);this.lean=THREE.MathUtils.damp(this.lean,leanTarget,14,dt);
+    const stance=this.isSliding()?1.08:(this.crouch?1.08:1.72);const leanX=this.lean*.48;
+    this.camera.position.x=this.playerPos.x+leanX;this.camera.position.z=this.playerPos.z;this.camera.position.y=(this.camera.position.y||0); // y is integrated above
+    this.camera.position.y+=(stance+this.groundHeightAt(this.playerPos.x,this.playerPos.z)+bob+shake-this.camera.position.y)*Math.min(1,dt*14)+this.velocity.y*dt;
+    const rollTarget=-this.lean*.13;
+    this.camera.rotation.z=THREE.MathUtils.damp(this.camera.rotation.z,rollTarget,18,dt);
+    // Keep jumping physical: visual bob/shake is applied to rotation/weapon, not by pulling the camera toward the ground.
+    if(this.dash){
+      this.camera.rotation.x += Math.sin(performance.now()*.032)*state.settings.shake*.0012;
+    }
   }
-  updateHealth(){const hp=document.getElementById('hp-fill');if(hp)hp.style.width=`${this.health}%`;const hv=document.getElementById('hp-value');if(hv)hv.textContent=`${Math.round(this.health)}`;const sv=document.getElementById('stamina-fill');if(sv)sv.style.width=`${this.stamina}%`;const st=document.getElementById('stamina-value');if(st)st.textContent=`${Math.round(this.stamina)}`}
-  updateDebug(){
-    const p=this.camera.position,s=this.velocity.length();const txt=[`ZERO DIVISION // DEBUG`,`FPS: ${Math.round(this.currentFPS||0)}`,`POS: ${p.x.toFixed(2)} / ${p.y.toFixed(2)} / ${p.z.toFixed(2)}`,`VEL: ${s.toFixed(2)} m/s`,`MAP: ${state.map}`,`DRONES: ${state.bots}`,`PING: ${this.ping} ms`,`PACKET LOSS: ${this.packetLoss.toFixed(1)} %`,`DRAW CALLS: ${this.renderer.info.render.calls}`,`TRIANGLES: ${this.renderer.info.render.triangles}`,`PIXEL RATIO: ${this.renderer.getPixelRatio().toFixed(2)}`,`DASH: ${this.dash}  CROUCH: ${this.crouch}`,`TOOL SLOT: ${this.selectedSlot}`];document.getElementById('debug-lines').textContent=txt.join('\n');
+  updateWeaponAnimation(dt,moving){
+    if(!this.weaponGroup)return;const bob=moving?Math.sin(performance.now()*.008*(this.dash?1.7:1))*.022:0;let x=.04+this.lean*.36,y=.02+bob*.65,z=0;let rx=this.weaponKick;
+    if(this.reloading){const p=1-Math.max(0,this.reloadTimer)/((this.currentWeaponType==='primary'?WEAPONS.primary[state.primary]:WEAPONS.secondary[state.secondary]).reload);x-=Math.sin(Math.min(1,p)*Math.PI)*.10;y-=Math.sin(Math.min(1,p)*Math.PI)*.14;rx=.30+Math.sin(p*Math.PI)*.12}
+    if(this.inspecting){const p=1-Math.max(0,this.inspectTimer)/1.8;const wave=Math.sin(Math.min(1,p)*Math.PI);x+=.22*wave;y+=.10*wave;rx=.18*wave;this.weaponGroup.rotation.y=.35*wave;}
+    else this.weaponGroup.rotation.y=0;
+    this.weaponGroup.position.set(x,y,z);this.weaponGroup.rotation.x=rx;this.weaponGroup.rotation.z=-this.lean*.36;this.weaponKick=THREE.MathUtils.damp(this.weaponKick,0,18,dt);
+    if(this.handGroup){this.handGroup.visible=state.settings.hands;this.handGroup.position.x=this.lean*.48;this.handGroup.position.y=(this.isSliding()?-0.10:0)+bob*.6;this.handGroup.rotation.z=-this.lean*.18}
   }
+  updateEnemies(dt){
+    const now=performance.now()*.00055;this.enemies.forEach((e,i)=>{if(!e.alive){e.respawn-=dt;if(e.respawn<=0){e.alive=true;e.hp=100;e.group.visible=true;e.group.position.copy(e.origin)}return}const x=e.origin.x+Math.sin(now+e.phase)*2.2,z=e.origin.z+Math.cos(now*.92+e.phase)*2.2;e.group.position.x=x;e.group.position.z=z;e.group.position.y=this.groundHeightAt(x,z);e.group.rotation.y=Math.sin(now+e.phase)*.3});
+  }
+  updateEffects(dt){for(let i=this.bulletHoles.length-1;i>=0;i--){const h=this.bulletHoles[i];h.ttl-=dt;if(h.ttl<=0){this.scene.remove(h.mesh);h.mesh.geometry.dispose();h.mesh.material.dispose();this.bulletHoles.splice(i,1)}}}
+
+  updateHUD(){
+    const stance=this.isSliding()?'スライド':(this.crouch?'しゃがみ':'立ち');document.getElementById('stance').textContent=stance;document.getElementById('drive').textContent=this.dash?'ダッシュ':this.isMoving()?'歩行':'停止';document.getElementById('hud-state').textContent=this.reloading?'リロード中':this.inspecting?'点検中':this.isSliding()?'スライド':this.dash?'高速移動':'準備完了';document.getElementById('enemy-counter').textContent=String(this.enemies.filter(e=>e.alive).length);
+    const weaponName=this.currentWeaponType==='primary'?state.primary:this.currentWeaponType==='secondary'?state.secondary:state.melee;document.getElementById('weapon-hud').textContent=weaponName;document.getElementById('ammo-value').textContent=this.currentWeaponType==='melee'?'—':`${this.magAmmo[this.currentWeaponType]} / ${this.reserveAmmo[this.currentWeaponType]}`;document.getElementById('fire-mode').textContent=this.currentWeaponType==='melee'?'近接':this.currentWeaponType==='primary'?'連射':'半自動';
+    const hp=document.getElementById('hp-fill');if(hp)hp.style.width=`${this.health}%`;const hv=document.getElementById('hp-value');if(hv)hv.textContent=Math.round(this.health);const sv=document.getElementById('stamina-fill');if(sv)sv.style.width=`${this.stamina}%`;const st=document.getElementById('stamina-value');if(st)st.textContent=Math.round(this.stamina);document.getElementById('ping').textContent=`${this.ping} ms`;document.getElementById('packet-loss').textContent=`${this.packetLoss.toFixed(1)} %`;
+  }
+  updateDebug(){const p=this.playerPos,s=this.velocity.length();const txt=[`ZERO DIVISION // DEBUG`,`FPS: ${Math.round(this.currentFPS||0)}`,`POS: ${p.x.toFixed(2)} / ${this.camera.position.y.toFixed(2)} / ${p.z.toFixed(2)}`,`VEL: ${s.toFixed(2)} m/s`,`MAP: ${state.map}`,`ENEMIES: ${this.enemies.filter(e=>e.alive).length}/${this.enemies.length}`,`WEAPON: ${this.currentWeaponType}`,`AMMO: ${this.currentWeaponType==='melee'?'—':`${this.magAmmo[this.currentWeaponType]} / ${this.reserveAmmo[this.currentWeaponType]}`}`,`PING: ${this.ping} ms`,`PACKET LOSS: ${this.packetLoss.toFixed(1)} %`,`DRAW CALLS: ${this.renderer.info.render.calls}`,`TRIANGLES: ${this.renderer.info.render.triangles}`,`PIXEL RATIO: ${this.renderer.getPixelRatio().toFixed(2)}`,`DASH: ${this.dash}  CROUCH: ${this.crouch}  LEAN: ${this.lean.toFixed(2)}`];document.getElementById('debug-lines').textContent=txt.join('\n')}
+
   render(){
     this.renderer.render(this.scene,this.camera);
     if(this.previewRenderer&&this.previewScene&&document.getElementById('loading-screen')?.classList.contains('active')){const t=performance.now()*.00022;this.previewCamera.position.x=Math.cos(t)*17;this.previewCamera.position.z=Math.sin(t)*17;this.previewCamera.position.y=10.5;this.previewCamera.lookAt(0,1.5,0);this.previewRenderer.render(this.previewScene,this.previewCamera)}
   }
-  animate(){
-    requestAnimationFrame(()=>this.animate());
-    const now=performance.now();
-    const dt=Math.min(0.05,Math.max(0.001,(now-this.lastFrameTime)/1000));
-    this.lastFrameTime=now;
-    this.update(dt);
-    this.render();
-    const fps=Math.round(1/dt);
-    this.currentFPS=fps;
-    const el=document.getElementById('fps');
-    if(el)el.textContent=`${fps} FPS`;
-  }
+  animate(){requestAnimationFrame(()=>this.animate());const now=performance.now(),dt=Math.min(.05,Math.max(.001,(now-this.lastFrameTime)/1000));this.lastFrameTime=now;this.update(dt);this.render();this.currentFPS=Math.round(1/dt);const el=document.getElementById('fps');if(el)el.textContent=`${this.currentFPS} FPS`}
 }
-const _dir=new THREE.Vector3();
+
+class SimplePointerLock extends EventTarget{
+  constructor(camera,domElement){super();this.camera=camera;this.domElement=domElement;this.isLocked=false;this.pointerSpeed=1;this._yaw=0;this._pitch=0;this._onMove=e=>this._move(e);this._onChange=()=>{const locked=document.pointerLockElement===this.domElement;if(locked!==this.isLocked){this.isLocked=locked;this.dispatchEvent(new Event(locked?'lock':'unlock'));}};document.addEventListener('pointerlockchange',this._onChange)}
+  lock(){this._yaw=this.camera.rotation.y;this._pitch=this.camera.rotation.x;this.domElement.requestPointerLock?.();document.addEventListener('mousemove',this._onMove,false)}
+  unlock(){document.exitPointerLock?.();document.removeEventListener('mousemove',this._onMove,false);this.isLocked=false}
+  _move(e){if(!this.isLocked)return;const k=.0022*this.pointerSpeed;this._yaw-=e.movementX*k;this._pitch-=e.movementY*k;const lim=Math.PI/2-.08;this._pitch=Math.max(-lim,Math.min(lim,this._pitch));this.camera.rotation.order='YXZ';this.camera.rotation.y=this._yaw;this.camera.rotation.x=this._pitch}
+}

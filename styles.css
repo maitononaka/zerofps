@@ -60,3 +60,13 @@ canvas{display:block}
 #app{position:relative;z-index:10}
 #game-ui{z-index:20}
 #game-ui.hidden{display:none!important}
+
+/* v0.8: put the WebGL world inside the app stacking context so the HUD cannot cover it. */
+#world-canvas{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;z-index:0!important;pointer-events:none!important;display:block;}
+.screen{z-index:30;}
+#game-ui{z-index:40;}
+.attachment-grid{display:grid;grid-template-columns:1fr;gap:2px}
+.ammo-block{margin-top:12px;text-align:right;border-top:1px solid rgba(217,255,95,.18);padding-top:9px}.ammo-count{font-size:25px;font-weight:900;letter-spacing:.05em;color:#eef5f1}.ammo-sub{font-size:9px;color:#8e9ba2;letter-spacing:.18em;margin-top:3px}
+.hud-hidden .hud,.hud-hidden #crosshair,.hud-hidden #debug-panel,.hud-hidden #hint{opacity:0;visibility:hidden;transition:opacity .15s}.hud,.hud#crosshair{transition:opacity .15s,visibility .15s}
+.operator-doll{width:130px;height:310px;position:relative;filter:drop-shadow(0 14px 18px #000)}.d-head{position:absolute;left:47px;top:22px;width:36px;height:36px;border-radius:50%;background:#c9b8a6;border:4px solid #222}.d-helmet{position:absolute;left:39px;top:14px;width:52px;height:23px;border-radius:13px 13px 4px 4px;border:4px solid #1f2529}.d-body{position:absolute;left:32px;top:63px;width:66px;height:90px;border-radius:18px 18px 13px 13px;border:4px solid #20262a}.d-arm{position:absolute;top:72px;width:20px;height:70px;border-radius:9px;background:#364249}.a1{left:19px;transform:rotate(8deg)}.a2{right:19px;transform:rotate(-8deg)}.d-leg{position:absolute;top:149px;width:20px;height:100px;border-radius:10px;background:#263037}.l1{left:43px;transform:rotate(6deg)}.l2{left:67px;transform:rotate(-6deg)}
+@media(max-width:900px){.attachment-grid{grid-template-columns:1fr}.ammo-count{font-size:20px}}

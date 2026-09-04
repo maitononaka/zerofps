@@ -18,7 +18,7 @@
   <div id="app">
     <div id="deploy-screen" class="screen active">
       <div class="geo geo-a"></div><div class="geo geo-b"></div><div class="geo geo-c"></div>
-      <div class="brand"><span class="eyebrow">戦術フィールドシミュレーション</span><h1>ZERO<br><span>DIVISION</span></h1><p>FIELD OPERATIONS // BUILD 0.7</p></div>
+      <div class="brand"><span class="eyebrow">戦術フィールドシミュレーション</span><h1>ZERO<br><span>DIVISION</span></h1><p>FIELD OPERATIONS // BUILD 0.8</p></div>
       <div class="deploy-actions">
         <button id="open-loadout" class="primary">装備</button>
         <button id="open-settings">設定</button>
@@ -34,10 +34,16 @@
         <section class="choices">
           <div class="choice-group"><h3>アーマー</h3><div class="choice-row" id="armor-choices"></div></div>
           <div class="choice-group"><h3>ヘルメット</h3><div class="choice-row" id="helmet-choices"></div></div>
-          <div class="choice-group"><h3>メインツール</h3><div class="choice-row" id="primary-choices"></div></div>
-          <div class="choice-group"><h3>サブツール</h3><div class="choice-row" id="secondary-choices"></div></div>
-          <div class="choice-group"><h3>ユーティリティ</h3><div class="choice-row" id="utility-choices"></div></div>
-          <div class="nudity-note">Training configuration permits <b>NO 装備</b> as an option.</div>
+          <div class="choice-group"><h3>メインウェポン</h3><div class="choice-row" id="primary-choices"></div></div>
+          <div class="choice-group"><h3>サブウェポン</h3><div class="choice-row" id="secondary-choices"></div></div>
+          <div class="choice-group"><h3>近接格闘</h3><div class="choice-row" id="melee-choices"></div></div>
+          <div class="choice-group"><h3>メディキット</h3><div class="choice-row" id="utility-choices"></div></div>
+          <div class="attachment-grid">
+            <div class="choice-group"><h3>マズルアタッチメント</h3><div class="choice-row" id="muzzle-choices"></div></div>
+            <div class="choice-group"><h3>ストックアタッチメント</h3><div class="choice-row" id="stock-choices"></div></div>
+            <div class="choice-group"><h3>サイト</h3><div class="choice-row" id="sight-choices"></div></div>
+          </div>
+          <div class="nudity-note">装備なしでの出撃も可能。4キーでメディキットを使用。</div>
         </section>
       </div>
       <div class="loadout-footer"><button id="go-staging" class="primary big">出撃準備へ →</button></div>
@@ -72,8 +78,8 @@
           <button class="map-option" data-map="interior"><b>室内 / 施設03</b><span>狭小 // 多層 / ガラス</span></button>
         </section>
         <section class="mission-card"><div class="section-title">SIMULATION 設定</div>
-          <label>偵察ドローン数 <input id="bot-count" type="range" min="2" max="14" value="6"><strong id="bot-count-value">6</strong></label>
-          <div class="mission-stats"><div><span>MAP</span><b id="staging-map-name">市街地 / ブロック7</b></div><div><span>ドローン</span><b id="staging-bots">6</b></div><div><span>天候</span><b>安定</b></div></div>
+          <label>敵ユニット数 <input id="bot-count" type="range" min="2" max="14" value="6"><strong id="bot-count-value">6</strong></label>
+          <div class="mission-stats"><div><span>MAP</span><b id="staging-map-name">市街地 / ブロック7</b></div><div><span>敵ユニット</span><b id="staging-bots">6</b></div><div><span>天候</span><b>安定</b></div></div>
           <button id="deploy-btn" class="primary big">シミュレーションへ出撃</button>
         </section>
       </div>
@@ -111,7 +117,7 @@
           </section>
           <section class="loading-card compact-card">
             <div class="loading-card-title">シミュレーション</div>
-            <div class="sim-number"><b id="load-bots">06</b><span>偵察ドローン</span></div>
+            <div class="sim-number"><b id="load-bots">06</b><span>敵ユニット</span></div>
             <div class="sim-note">ロード完了後、自動的にフィールドへ移行します。</div>
           </section>
         </div>
@@ -122,9 +128,8 @@
       <div id="crosshair"><i></i><i></i><i></i><i></i></div>
       <div class="hud top-left"><span>ZERO DIVISION</span><small id="map-hud">市街地 / ブロック7</small></div>
       <div class="hud top-right"><span id="hud-state">準備完了</span><small><b id="fps">-- FPS</b> <b id="ping">-- ms</b> <b id="packet-loss">0.0 %</b></small></div>
-      <div id="hotbar" aria-label="ホットバー"><div class="slot active" data-slot="1"><b>1</b><span>SCAN</span></div><div class="slot" data-slot="2"><b>2</b><span>TAB</span></div><div class="slot" data-slot="3"><b>3</b><span>CAM</span></div><div class="slot" data-slot="4"><b>4</b><span>BEAC</span></div><div class="slot" data-slot="5"><b>5</b><span>RADIO</span></div><div class="slot" data-slot="6"><b>6</b><span>SENS</span></div><div class="slot" data-slot="7"><b>7</b><span>MED</span></div><div class="slot" data-slot="8"><b>8</b><span>KIT</span></div><div class="slot" data-slot="9"><b>9</b><span>BAT</span></div><div class="slot" data-slot="10"><b>0</b><span>EMPTY</span></div></div>
       <div class="hud bottom-left"><div class="hud-line"><span>姿勢</span><b id="stance">立ち</b></div><div class="hud-line"><span>移動</span><b id="drive">歩行</b></div></div>
-      <div class="hud bottom-right"><div class="hud-line"><span>ドローン</span><b id="drone-counter">6</b></div><div class="hud-line"><span>ツール</span><b id="tool-hud">スキャナー</b></div><div class="status-meter"><div class="meter-label"><span>HP</span><b><span id="hp-value">100</span> / 100</b></div><div class="meter"><i id="hp-fill"></i></div></div><div class="status-meter"><div class="meter-label"><span>STAMINA</span><b><span id="stamina-value">100</span> / 100</b></div><div class="meter"><i id="stamina-fill"></i></div></div></div>
+      <div class="hud bottom-right"><div class="hud-line"><span>敵ユニット</span><b id="enemy-counter">6</b></div><div class="hud-line"><span>武器</span><b id="weapon-hud">M4A1</b></div><div class="ammo-block"><div class="ammo-count" id="ammo-value">30 / 120</div><div class="ammo-sub" id="fire-mode">連射</div></div><div class="status-meter"><div class="meter-label"><span>HP</span><b><span id="hp-value">100</span> / 100</b></div><div class="meter"><i id="hp-fill"></i></div></div><div class="status-meter"><div class="meter-label"><span>STAMINA</span><b><span id="stamina-value">100</span> / 100</b></div><div class="meter"><i id="stamina-fill"></i></div></div></div>
       <div id="debug-panel" class="debug-panel hidden"><pre id="debug-lines">ZERO DIVISION // DEBUG</pre></div>
       <div id="pause-card" class="pause-card hidden"><h2>シミュレーション停止</h2><p>クリックで再開</p><button id="exit-to-menu">シミュレーション終了</button></div>
       <div id="hint">クリックでマウス操作 · WASD 移動 · CTRL ダッシュ · SHIFT しゃがみ · Q/E リーン · G ガラス破壊テスト</div>
