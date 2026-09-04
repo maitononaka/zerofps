@@ -1,4 +1,4 @@
-# ZERO DIVISION v0.9
+# ZERO DIVISION v0.9.2
 
 Browser FPS prototype built with Three.js.
 
@@ -12,7 +12,7 @@ Open http://127.0.0.1:8000/
 WASD move / Mouse look / CTRL sprint / SHIFT crouch / Q,E lean / SPACE jump
 1 main / 2 secondary / 3 melee / 4 med kit / R reload / H inspect / 0 debug / ESC pause
 
-## v0.9
+## v0.9.2
 - Sprint drops to walk when movement stops
 - Sliding ends in standing state
 - Higher jump
@@ -25,3 +25,6 @@ WASD move / Mouse look / CTRL sprint / SHIFT crouch / Q,E lean / SPACE jump
 - 1/2/3 weapon switching; 4 keeps the med kit
 - No gameplay hotbar
 - ESC pause can resume by clicking the pause panel
+
+- Menu UI now binds before the Three.js game module is initialized, preventing a game initialization error from disabling the deploy/loadout/settings buttons.
+- Active menu screens explicitly receive pointer input above the WebGL canvas.
