@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>ZERO DIVISION // Field Simulator</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <div id="deploy-screen" class="screen active">
+      <div class="geo geo-a"></div><div class="geo geo-b"></div><div class="geo geo-c"></div>
+      <div class="brand"><span class="eyebrow">戦術フィールドシミュレーション</span><h1>ZERO<br><span>DIVISION</span></h1><p>FIELD OPERATIONS // BUILD 0.7</p></div>
+      <div class="deploy-actions">
+        <button id="open-loadout" class="primary">装備</button>
+        <button id="open-settings">設定</button>
+        <button id="quick-deploy">クイック出撃</button>
+      </div>
+      <div class="statusbar"><span>ローカルシミュレーション</span><span>THREE.JS / WEBGL</span><span>iPad A16 対応</span></div>
+    </div>
+
+    <div id="loadout-screen" class="screen">
+      <div class="panel topbar"><button class="back" data-back="deploy-screen">← 戻る</button><div class="panel-title">装備</div><div class="mini-status">CONFIG // <span id="loadout-ready">準備完了</span></div></div>
+      <div class="loadout-grid">
+        <section class="preview-card"><div class="section-title">オペレーター プレビュー</div><div id="operator-preview"></div><div class="preview-label">外見設定</div></section>
+        <section class="choices">
+          <div class="choice-group"><h3>アーマー</h3><div class="choice-row" id="armor-choices"></div></div>
+          <div class="choice-group"><h3>ヘルメット</h3><div class="choice-row" id="helmet-choices"></div></div>
+          <div class="choice-group"><h3>メインツール</h3><div class="choice-row" id="primary-choices"></div></div>
+          <div class="choice-group"><h3>サブツール</h3><div class="choice-row" id="secondary-choices"></div></div>
+          <div class="choice-group"><h3>ユーティリティ</h3><div class="choice-row" id="utility-choices"></div></div>
+          <div class="nudity-note">Training configuration permits <b>NO 装備</b> as an option.</div>
+        </section>
+      </div>
+      <div class="loadout-footer"><button id="go-staging" class="primary big">出撃準備へ →</button></div>
+    </div>
+
+    <div id="settings-screen" class="screen">
+      <div class="panel topbar"><button class="back" data-back="deploy-screen">← 戻る</button><div class="panel-title">設定</div><div></div></div>
+      <div class="settings-wrap">
+        <div class="settings-card"><h2>操作</h2>
+          <label>ダッシュ方式 <select id="dash-mode"><option value="toggle">トグル</option><option value="hold">長押し</option></select></label>
+          <label>しゃがみ方式 <select id="crouch-mode"><option value="toggle">トグル</option><option value="hold">長押し</option></select></label>
+          <label class="check"><input type="checkbox" id="hands-toggle" checked> 手を表示</label>
+          <label>マウス感度 <input id="sensitivity" type="range" min="0.3" max="2" step="0.05" value="1"></label>
+          <label>ダッシュ時の視点揺れ <input id="shake-size" type="range" min="0" max="1.5" step="0.05" value="0.35"></label>
+          <div class="keybinds"><span><span>WASD</span> 移動 <span>MOUSE</span> 視点 <span>CTRL</span> ダッシュ <span>SHIFT</span> しゃがみ <span>Q / E</span> リーン <span>SPACE</span> ジャンプ <span>ESC</span> ポーズ</div>
+        </div>
+        <div class="settings-card"><h2>パフォーマンス</h2>
+          <label>描画解像度上限 <select id="pixel-ratio"><option value="1.25">1.25×</option><option value="1.5" selected>1.50×</option><option value="2">2.00×</option></select></label>
+          <label class="check"><input type="checkbox" id="shadows-toggle" checked> 動的シャドウ</label>
+          <label class="check"><input type="checkbox" id="sky-toggle" checked> 空と大気</label>
+          <p class="muted">この試作版は重いポストエフェクトより安定したフレーム時間を優先しています。後でGLBモデルへ差し替えられます。</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="staging-screen" class="screen">
+      <div class="panel topbar"><button class="back" data-back="loadout-screen">← 戻る</button><div class="panel-title">出撃準備</div><div class="mini-status">任務 // 偵察</div></div>
+      <div class="staging-grid">
+        <section class="map-list"><div class="section-title">マップ選択</div>
+          <button class="map-option selected" data-map="city"><b>市街地 / ブロック7</b><span>中規模 // 市街地</span></button>
+          <button class="map-option" data-map="mountain"><b>山岳 / リッジライン</b><span>広域 // 高低差 / 急斜面</span></button>
+          <button class="map-option" data-map="interior"><b>室内 / 施設03</b><span>狭小 // 多層 / ガラス</span></button>
+        </section>
+        <section class="mission-card"><div class="section-title">SIMULATION 設定</div>
+          <label>偵察ドローン数 <input id="bot-count" type="range" min="2" max="14" value="6"><strong id="bot-count-value">6</strong></label>
+          <div class="mission-stats"><div><span>MAP</span><b id="staging-map-name">市街地 / ブロック7</b></div><div><span>ドローン</span><b id="staging-bots">6</b></div><div><span>天候</span><b>安定</b></div></div>
+          <button id="deploy-btn" class="primary big">シミュレーションへ出撃</button>
+        </section>
+      </div>
+    </div>
+
+    <div id="loading-screen" class="screen">
+      <div class="loading-orbit"></div>
+      <div class="loading-shell">
+        <div class="loading-main">
+          <div class="loading-content">
+            <span class="eyebrow">ZERO DIVISION // FIELD LOAD</span>
+            <h2 id="loading-title">市街地 / ブロック7</h2>
+            <div id="loading-code" class="loading-code">CITY // BLOCK 7</div>
+            <p id="loading-status">シーンを初期化しています…</p>
+            <div class="loading-bar"><i id="loading-fill"></i></div>
+            <div class="loading-meta"><span id="loading-percent">0%</span><span>WEBGL / THREE.JS</span></div>
+          </div>
+          <div class="preview-frame">
+            <div class="preview-header"><span>TACTICAL MAP PREVIEW</span><span>LIVE</span></div>
+            <div id="loading-preview"></div>
+          </div>
+        </div>
+        <div class="briefing-grid">
+          <section class="loading-card briefing-card">
+            <div class="loading-card-title">作戦概要</div>
+            <p id="loading-brief">都市区画を横断し、指定エリアの状況を確認する。</p>
+            <div class="brief-tags"><span id="loading-tip-1">中距離を維持</span><span id="loading-tip-2">遮蔽物を活用</span><span id="loading-tip-3">交差点を優先確認</span></div>
+          </section>
+          <section class="loading-card">
+            <div class="loading-card-title">推奨装備</div>
+            <div class="rec-row"><span>アーマー</span><b id="load-rec-armor">ライト</b></div>
+            <div class="rec-row"><span>ヘルメット</span><b id="load-rec-helmet">偵察</b></div>
+            <div class="rec-row"><span>メインツール</span><b id="load-rec-tool">スキャナー</b></div>
+            <div class="rec-row"><span>サブツール</span><b id="load-rec-support">ビーコン</b></div>
+          </section>
+          <section class="loading-card compact-card">
+            <div class="loading-card-title">シミュレーション</div>
+            <div class="sim-number"><b id="load-bots">06</b><span>偵察ドローン</span></div>
+            <div class="sim-note">ロード完了後、自動的にフィールドへ移行します。</div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <div id="game-ui" class="hidden">
+      <div id="crosshair"><i></i><i></i><i></i><i></i></div>
+      <div class="hud top-left"><span>ZERO DIVISION</span><small id="map-hud">市街地 / ブロック7</small></div>
+      <div class="hud top-right"><span id="hud-state">準備完了</span><small><b id="fps">-- FPS</b> <b id="ping">-- ms</b> <b id="packet-loss">0.0 %</b></small></div>
+      <div id="hotbar" aria-label="ホットバー"><div class="slot active" data-slot="1"><b>1</b><span>SCAN</span></div><div class="slot" data-slot="2"><b>2</b><span>TAB</span></div><div class="slot" data-slot="3"><b>3</b><span>CAM</span></div><div class="slot" data-slot="4"><b>4</b><span>BEAC</span></div><div class="slot" data-slot="5"><b>5</b><span>RADIO</span></div><div class="slot" data-slot="6"><b>6</b><span>SENS</span></div><div class="slot" data-slot="7"><b>7</b><span>MED</span></div><div class="slot" data-slot="8"><b>8</b><span>KIT</span></div><div class="slot" data-slot="9"><b>9</b><span>BAT</span></div><div class="slot" data-slot="10"><b>0</b><span>EMPTY</span></div></div>
+      <div class="hud bottom-left"><div class="hud-line"><span>姿勢</span><b id="stance">立ち</b></div><div class="hud-line"><span>移動</span><b id="drive">歩行</b></div></div>
+      <div class="hud bottom-right"><div class="hud-line"><span>ドローン</span><b id="drone-counter">6</b></div><div class="hud-line"><span>ツール</span><b id="tool-hud">スキャナー</b></div><div class="status-meter"><div class="meter-label"><span>HP</span><b><span id="hp-value">100</span> / 100</b></div><div class="meter"><i id="hp-fill"></i></div></div><div class="status-meter"><div class="meter-label"><span>STAMINA</span><b><span id="stamina-value">100</span> / 100</b></div><div class="meter"><i id="stamina-fill"></i></div></div></div>
+      <div id="debug-panel" class="debug-panel hidden"><pre id="debug-lines">ZERO DIVISION // DEBUG</pre></div>
+      <div id="pause-card" class="pause-card hidden"><h2>シミュレーション停止</h2><p>クリックで再開</p><button id="exit-to-menu">シミュレーション終了</button></div>
+      <div id="hint">クリックでマウス操作 · WASD 移動 · CTRL ダッシュ · SHIFT しゃがみ · Q/E リーン · G ガラス破壊テスト</div>
+    </div>
+  </div>
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
