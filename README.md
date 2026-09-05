@@ -1,12 +1,10 @@
-# Zero Division V12
+# Zero Division V16
 
-V12 fixes the FPS view-model transform and movement-axis desynchronization.
+Fixes the M4A1 first-person view using the supplied GLB and socket JSON as a single coordinate system.
 
-Key changes:
-- M4A1 is rendered from the authored GLB socket coordinate system.
-- Hands are siblings of the weapon model and are positioned from the JSON sockets after the model transform.
-- Optic/muzzle/stock sockets are transformed into the weapon-view coordinate space instead of being placed in source-model space.
-- Weapon view is anchored to the right-hand socket; ADS is anchored to the optic socket.
-- Horizontal movement reads the live Pointer Lock yaw every frame, so W/A/S/D follows the current view rather than the initial spawn direction.
-- Sliding uses the live view yaw when starting.
-- Compass follows the same yaw source.
+- M4A1 source model: assets/m4a1.glb
+- Socket data: assets/m4a1_sockets.json
+- M4 local X axis is treated as the barrel axis; the exported mesh is rotated +90deg around Y so the muzzle points forward (-Z) in the FPS camera.
+- The socket JSON controls optic, muzzle, foregrip, stock, hands and iron-sight anchors.
+- ADS uses the optic socket only when an optic is equipped; otherwise it uses the iron_rear socket.
+- Socket scale values are used directly; no hidden x10 multiplier.

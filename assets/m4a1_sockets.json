@@ -1,7 +1,7 @@
 {
   "format": "zero-division-sockets-v2",
   "model": "m4a1.glb",
-  "source": "C:/Users/maito/OneDrive/Desktop/zerofps/assets/m4a1.glb",
+  "source": "",
   "sockets": {
     "optic": {
       "kind": "attachment",
@@ -104,6 +104,44 @@
         0.4273078399339672,
         -0.05962190511288659,
         -0.0005414840493945672
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "enabled": true
+    },
+    "iron_rear": {
+      "kind": "ads",
+      "position": [
+        0.39,
+        0.315,
+        0.0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "enabled": true
+    },
+    "iron_front": {
+      "kind": "ads",
+      "position": [
+        -0.27,
+        0.3,
+        0.0
       ],
       "rotation": [
         0,
