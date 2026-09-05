@@ -358,24 +358,45 @@ export class ZeroDivisionGame{
         new Promise((resolve,reject)=>loader.load('./assets/m4a1.glb',resolve,undefined,reject)),
         fetch('./assets/m4a1_sockets.json').then(r=>r.ok?r.json():{}).catch(()=>({}))
       ]);
-      const root=gltf.scene;
-      root.traverse(o=>{
+
+      // The socket editor stores points in a centered local coordinate space.
+      // The downloaded GLB itself has an offset pivot, so keep it as a child
+      // and translate it by its geometric center before applying the FPS
+      // orientation. This prevents every socket (hands / optic / muzzle) from
+      // drifting away from the actual mesh.
+      const sourceRoot=gltf.scene;
+      sourceRoot.updateMatrixWorld(true);
+      const bounds=new THREE.Box3().setFromObject(sourceRoot);
+      const center=bounds.getCenter(new THREE.Vector3());
+      sourceRoot.position.copy(center).multiplyScalar(-1);
+      sourceRoot.updateMatrixWorld(true);
+
+      sourceRoot.traverse(o=>{
         if(o.isMesh){
           o.castShadow=false;
           o.receiveShadow=false;
-          if(o.material){o.material.transparent=false;o.material.depthWrite=true;}
+          if(o.material){
+            o.material.transparent=false;
+            o.material.depthWrite=true;
+          }
         }
       });
-      // IMPORTANT: Do not recenter or otherwise bake a new coordinate system here.
-      // The socket editor authored positions in the source GLB coordinate system:
-      // X = barrel axis, Y = up, Z = lateral. The only view-model transform is
-      // a fixed -90deg Y rotation plus a uniform scale. Every socket is a child of
-      // this root, so the JSON positions remain exact through ADS/lean/recoil.
+
+      const root=new THREE.Group();
+      root.name='m4a1-viewmodel-root';
+      root.add(sourceRoot);
+
+      // In the source GLB the muzzle is on local -X. Rotate that axis to
+      // camera-forward -Z exactly once. Socket coordinates stay unchanged.
       root.rotation.set(0,-Math.PI/2,0);
-      root.scale.setScalar(0.56);
+      root.scale.setScalar(0.48);
       root.position.set(0,0,0);
       root.updateMatrixWorld(true);
-      root.userData.zeroDivisionSourceAxes='X=barrel/front, Y=up, Z=lateral';
+      root.userData.zeroDivisionSourceAxes='source: X=barrel axis, Y=up, Z=lateral';
+      root.userData.socketSpace='centered-local';
+      root.userData.originalBoundsCenter=center.toArray();
+      root.userData.modelBounds=bounds.clone();
+
       this.weaponModel=root;
       this.weaponSocketData=sockets && sockets.sockets ? sockets : {sockets:{}};
       this.weaponModelReady=true;
@@ -466,10 +487,8 @@ export class ZeroDivisionGame{
     if(this.weaponModelReady&&this.weaponModel&&this.currentWeaponType==='primary'&&state.primary==='M4A1'){
       if(this.weaponModel.parent!==this.weaponGroup)this.weaponGroup.add(this.weaponModel);
       this.weaponModel.visible=true;
-      this.weaponModel.position.set(0,0,0);
-      // Preserve the socket editor coordinate system. DO NOT recenter this model.
-      this.weaponModel.rotation.set(0,-Math.PI/2,0);
-      this.weaponModel.scale.setScalar(.56);
+      // Transform is established once during preload; never overwrite the
+      // socket-editor coordinate frame here.
       this.weaponModel.updateMatrixWorld(true);
       this.attachHandsToWeaponModel();
       this.rebuildSocketDrivenAttachments();
@@ -504,9 +523,10 @@ export class ZeroDivisionGame{
       obj.userData.zdAttachment=true;
       obj.position.set(...s.position);
       if(Array.isArray(s.rotation)&&s.rotation.length===3)obj.rotation.set(s.rotation[0],s.rotation[1],s.rotation[2]);
-      if(Array.isArray(s.scale)&&s.scale.length===3)obj.scale.set(s.scale[0]*10,s.scale[1]*10,s.scale[2]*10);
-      // Muzzle/stock models are authored with their length axis on local Z;
-      // rotate them onto the M4's original X barrel axis.
+      // Socket scale is marker metadata from the editor, not the runtime
+      // attachment scale. Runtime attachments keep their own authored size.
+      // Muzzle/stock helpers are authored along local Z; rotate them onto the
+      // model's X barrel axis after applying the socket rotation.
       if(name==='muzzle'||name==='stock')obj.rotation.y+=Math.PI/2;
       model.add(obj);return obj;
     };
@@ -648,6 +668,11 @@ export class ZeroDivisionGame{
 
   update(dt){
     if(!this.running||this.paused)return;
+    // SimplePointerLock owns the real mouse-look state. Keep the game state
+    // synchronized every frame so movement, lean, compass and camera all use
+    // the exact same horizontal heading.
+    this.yaw=this.controls.yaw;
+    this.pitch=this.controls.pitch;
     if(state.settings.dashMode==='hold')this.dash=!!(this.keys.ControlLeft||this.keys.ControlRight);
     if(state.settings.crouchMode==='hold'&&!this.isSliding())this.crouch=!!(this.keys.ShiftLeft||this.keys.ShiftRight);
 
@@ -740,7 +765,7 @@ export class ZeroDivisionGame{
     const adsLerp=this.ads?1:0;
     // Weapon view positions are camera-local. ADS is computed from the actual
     // optic socket, not a hard-coded point, so a future socket edit updates ADS automatically.
-    const normal=new THREE.Vector3(.16,-.22,-1.25);
+    const normal=new THREE.Vector3(.20,-.28,-1.02);
     let target=normal.clone();
     const opticLocal=this.getSocketInWeaponView('optic');
     if(opticLocal){
@@ -789,7 +814,9 @@ export class ZeroDivisionGame{
     const wrap=document.getElementById('compass');if(!wrap)return;
     wrap.classList.toggle('hidden',!state.settings.compass);
     if(!state.settings.compass)return;
-    const deg=(this.yaw*180/Math.PI%360+360)%360;
+    // Three.js camera yaw is positive toward -X (west). Convert it to a
+    // conventional compass bearing where +X=east and -Z=north.
+    const deg=(((-this.yaw*180/Math.PI)%360)+360)%360;
     const headingEl=document.getElementById('compass-heading');if(headingEl)headingEl.textContent=String(Math.round(deg)).padStart(3,'0')+'°';
     const strip=document.getElementById('compass-strip');if(!strip)return;
     const labels=['N','NE','E','SE','S','SW','W','NW'];

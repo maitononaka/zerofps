@@ -12,7 +12,7 @@
   <div id="app">
     <div id="deploy-screen" class="screen active">
       <div class="geo geo-a"></div><div class="geo geo-b"></div><div class="geo geo-c"></div>
-      <div class="brand"><span class="eyebrow">戦術フィールドシミュレーション</span><h1>ZERO<br><span>DIVISION</span></h1><p>FIELD OPERATIONS // BUILD 0.8</p></div>
+      <div class="brand"><span class="eyebrow">戦術フィールドシミュレーション</span><h1>ZERO<br><span>DIVISION</span></h1><p>FIELD OPERATIONS // BUILD 0.13</p></div>
       <div class="deploy-actions">
         <button id="open-loadout" class="primary">装備</button>
         <button id="open-settings">設定</button>
@@ -170,7 +170,7 @@
           const fill=$('loading-fill'), percent=$('loading-percent'), status=$('loading-status');
           if(fill)fill.style.width='6%'; if(percent)percent.textContent='6%'; if(status)status.textContent='ゲーム本体を読み込んでいます…';
           try{
-            const mod=await import('./js/game.js?build=1220');
+            const mod=await import('./js/game.js?build=1300');
             if(!window.ZERO_DIVISION_GAME) window.ZERO_DIVISION_GAME=new mod.ZeroDivisionGame();
             await window.ZERO_DIVISION_GAME.start(state.map,state.bots);
           }catch(err){
