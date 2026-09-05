@@ -31,3 +31,7 @@ Open the folder with VS Code Live Server or run `python -m http.server 8000`.
 - Slide direction uses the same camera-space movement basis.
 - ADS, lean, weapon bob and recoil continue to move the view-model as one assembly.
 - Debug overlay shows pressed keys only while debug is open.
+
+
+## V10
+Weapon normalization and camera-space movement were rebuilt: imported M4A1 is rotated/centered after scaling, view-model materials render consistently, arm pose is reduced, and WASD is calculated directly from look yaw to prevent heading-dependent reversal.

@@ -357,17 +357,22 @@ export class ZeroDivisionGame{
       ]);
       const root=gltf.scene;
       root.traverse(o=>{if(o.isMesh){o.castShadow=false;o.receiveShadow=false;if(o.material){o.material.transparent=false;}}});
-      // Normalize the imported model into the Zero Division view-model convention.
-      // The source model is long on local X; rotate it so the barrel points toward -Z.
-      const box=new THREE.Box3().setFromObject(root);
-      const size=box.getSize(new THREE.Vector3());
-      const center=box.getCenter(new THREE.Vector3());
+      // Normalize once, in the correct order. The source GLB's long axis is local +X.
+      // Rotate first so the barrel points toward local -Z, then center the rotated/scaled mesh.
+      root.rotation.set(0,-Math.PI/2,0);
+      root.scale.setScalar(1);
+      root.position.set(0,0,0);
+      root.updateMatrixWorld(true);
+      const box0=new THREE.Box3().setFromObject(root);
+      const size=box0.getSize(new THREE.Vector3());
       const maxLen=Math.max(size.x,size.y,size.z);
       const scale=1.55/Math.max(maxLen,0.001);
-      root.position.sub(center);
-      root.rotation.y=-Math.PI/2;
       root.scale.setScalar(scale);
-      root.position.set(0,0,0);
+      root.updateMatrixWorld(true);
+      const box1=new THREE.Box3().setFromObject(root);
+      const center1=box1.getCenter(new THREE.Vector3());
+      root.position.sub(center1);
+      root.updateMatrixWorld(true);
       this.weaponModel=root;
       this.weaponSocketData=sockets;
       this.weaponModelReady=true;
@@ -400,8 +405,9 @@ export class ZeroDivisionGame{
     // First-person grip pose in weapon-local coordinates.  The right hand sits at the pistol grip
     // and the left hand reaches the handguard, so both stay attached when ADS/lean/recoil moves the weapon.
     this.handPoints={
-      right:{hand:new THREE.Vector3(.13,-.235,.20),elbow:new THREE.Vector3(.23,-.13,.43),shoulder:new THREE.Vector3(.34,-.05,.66)},
-      left:{hand:new THREE.Vector3(-.11,-.19,-.36),elbow:new THREE.Vector3(-.24,-.11,-.06),shoulder:new THREE.Vector3(-.36,-.02,.48)}
+      // Local to the normalized M4A1: right hand on pistol grip, left hand on handguard.
+      right:{hand:new THREE.Vector3(.12,-.19,.19),elbow:new THREE.Vector3(.23,-.10,.38),shoulder:new THREE.Vector3(.34,.00,.50)},
+      left:{hand:new THREE.Vector3(-.10,-.03,-.34),elbow:new THREE.Vector3(-.22,.04,-.12),shoulder:new THREE.Vector3(-.34,.06,.36)}
     };
     for(const side of ['left','right']){
       const p=this.handPoints[side];
@@ -438,14 +444,25 @@ export class ZeroDivisionGame{
       if(this.weaponModel.parent!==this.weaponGroup)this.weaponGroup.add(this.weaponModel);
       this.weaponModel.visible=true;
       this.weaponModel.position.set(0,0,0);
-      if(!this.weaponModel.userData.baseScale)this.weaponModel.userData.baseScale=this.weaponModel.scale.x;
-      this.weaponModel.scale.setScalar(this.weaponModel.userData.baseScale);
+      this.weaponModel.rotation.set(0,0,0);
 
-      // Attachment sockets are normalized to the imported model's local space.
-      const optics=this.buildSight(state.sight);optics.position.copy(this.getWeaponSocket('optic'));this.weaponModel.add(optics);this.weaponSight=optics;
-      const muzzle=this.buildMuzzle(state.muzzle);muzzle.position.copy(this.getWeaponSocket('muzzle'));this.weaponModel.add(muzzle);
-      this.muzzleFlash=new THREE.Mesh(new THREE.SphereGeometry(.08,10,8),new THREE.MeshBasicMaterial({color:0xffe7a0,transparent:true,opacity:0,depthWrite:false}));
-      const mfPos=this.getWeaponSocket('muzzle').clone().add(new THREE.Vector3(0,0,-.10));this.muzzleFlash.position.copy(mfPos);this.weaponModel.add(this.muzzleFlash);
+      // The imported model has already been normalized: -Z = barrel/front, +Z = stock/rear.
+      // Keep the sockets in that same local coordinate system.
+      const optics=this.buildSight(state.sight);
+      optics.position.copy(this.getWeaponSocket('optic'));
+      this.weaponModel.add(optics);
+      this.weaponSight=optics;
+
+      const muzzle=this.buildMuzzle(state.muzzle);
+      muzzle.position.copy(this.getWeaponSocket('muzzle'));
+      this.weaponModel.add(muzzle);
+
+      this.muzzleFlash=new THREE.Mesh(
+        new THREE.SphereGeometry(.085,10,8),
+        new THREE.MeshBasicMaterial({color:0xffe7a0,transparent:true,opacity:0,depthWrite:false})
+      );
+      this.muzzleFlash.position.copy(this.getWeaponSocket('muzzle')).add(new THREE.Vector3(0,0,-.06));
+      this.weaponModel.add(this.muzzleFlash);
       return;
     }
     // Lightweight procedural fallback for the other weapons.
@@ -601,12 +618,11 @@ export class ZeroDivisionGame{
       const speed=this.crouch?2.35:(this.dash?8.4:4.6);
       let f=(this.keys.KeyW?1:0)-(this.keys.KeyS?1:0),r=(this.keys.KeyD?1:0)-(this.keys.KeyA?1:0);
       const len=Math.hypot(f,r);if(len>0){f/=len;r/=len;}
-      // Derive movement directly from the camera's world-space forward/right axes.
-      // This removes the old yaw-sign mismatch that caused W/A/S/D to reverse at some headings.
-      const forward=this.camera.getWorldDirection(new THREE.Vector3());
-      forward.y=0;
-      if(forward.lengthSq()<1e-8) forward.set(0,0,-1); else forward.normalize();
-      const side=new THREE.Vector3().crossVectors(forward,UP).normalize();
+      // Movement is derived directly from the look yaw, never from the camera quaternion.
+      // This keeps W/A/S/D stable even while pitch, lean roll, ADS or camera smoothing is active.
+      const sy=Math.sin(this.yaw), cy=Math.cos(this.yaw);
+      const forward=new THREE.Vector3(-sy,0,-cy);
+      const side=new THREE.Vector3(cy,0,-sy);
       const wish=forward.multiplyScalar(f).add(side.multiplyScalar(r));
       if(len>0)wish.multiplyScalar(speed);
       const accel=len>0?(this.crouch?15:18):24;
@@ -650,10 +666,8 @@ export class ZeroDivisionGame{
     const shake=Math.sin(t*26)*shakeAmp;
     const leanTarget=this.keys.KeyQ?-1:(this.keys.KeyE?1:0);
     this.lean=THREE.MathUtils.damp(this.lean,leanTarget,14,dt);
-    const forward=this.camera.getWorldDirection(new THREE.Vector3());
-    forward.y=0;
-    if(forward.lengthSq()<1e-8) forward.set(0,0,-1); else forward.normalize();
-    const right=new THREE.Vector3().crossVectors(forward,UP).normalize();
+    const sy=Math.sin(this.yaw),cy=Math.cos(this.yaw);
+    const right=new THREE.Vector3(cy,0,-sy);
     const leanAmount=this.lean*.48;
     this.camera.position.x=this.playerPos.x+right.x*leanAmount;
     this.camera.position.z=this.playerPos.z+right.z*leanAmount;
@@ -669,17 +683,20 @@ export class ZeroDivisionGame{
     const t=performance.now()*.001;
     const bob=moving?Math.sin(t*(this.dash?14:10))*(this.dash?.035:.018):0;
     const adsLerp=this.ads?1:0;
-    // View-model pose: normal carry on the lower-right; ADS slides the optic onto the centerline.
-    let x=THREE.MathUtils.lerp(.18,0.00,adsLerp)+this.lean*.14;
-    let y=THREE.MathUtils.lerp(-.15,-.145,adsLerp)+bob*.55;
-    let z=THREE.MathUtils.lerp(-1.00,-.57,adsLerp);
+    // Grounded rifle carry. The normalized M4's optic socket is at local (0,.145,-.18).
+    // In ADS we place that socket close to the camera centerline instead of merely changing FOV.
+    const normal=new THREE.Vector3(.22,-.18,-.86);
+    const ads=new THREE.Vector3(0.00,-.055,-.52);
+    let x=THREE.MathUtils.lerp(normal.x,ads.x,adsLerp)+this.lean*.11;
+    let y=THREE.MathUtils.lerp(normal.y,ads.y,adsLerp)+bob*.45;
+    let z=THREE.MathUtils.lerp(normal.z,ads.z,adsLerp);
     let rx=this.weaponKick;
     if(this.isSliding())y-=.12;
     if(this.reloading){const p=1-Math.max(0,this.reloadTimer)/((this.currentWeaponType==='primary'?WEAPONS.primary[state.primary]:WEAPONS.secondary[state.secondary]).reload);const wave=Math.sin(Math.min(1,p)*Math.PI);x-=wave*.10;y-=wave*.14;rx=.28+wave*.10;}
     if(this.inspecting){const p=1-Math.max(0,this.inspectTimer)/1.8;const wave=Math.sin(Math.min(1,p)*Math.PI);x+=.20*wave;y+=.10*wave;rx=.18*wave;this.weaponGroup.rotation.y=.32*wave;}else this.weaponGroup.rotation.y=0;
     this.weaponGroup.position.set(x,y,z);
-    this.weaponGroup.rotation.x=rx;
-    this.weaponGroup.rotation.y=THREE.MathUtils.lerp(0,-.015,adsLerp);
+    this.weaponGroup.rotation.x=rx + THREE.MathUtils.lerp(-.045,0,adsLerp);
+    this.weaponGroup.rotation.y=THREE.MathUtils.lerp(-.03,0,adsLerp);
     this.weaponGroup.rotation.z=-this.lean*.30;
     this.weaponKick=THREE.MathUtils.damp(this.weaponKick,0,18,dt);
     if(this.handGroup){
