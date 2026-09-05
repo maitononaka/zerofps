@@ -365,13 +365,24 @@ export class ZeroDivisionGame{
           if(o.material){o.material.transparent=false;o.material.depthWrite=true;}
         }
       });
-      // The supplied socket JSON is authored against the uploaded m4a1(1).glb.
-      // That model's barrel axis is local -X, so rotate it -90° around Y to make -Z
-      // the in-game forward axis. Do not recenter or apply any extra translation.
+      // Derive the weapon's forward axis from the authored socket data instead of
+      // guessing the GLB orientation. This keeps the model and sockets in the same
+      // coordinate system and prevents the whole view-model from appearing reversed.
       root.position.set(0,0,0);
-      root.rotation.set(0,-Math.PI/2,0);
-      root.scale.setScalar(0.84);
-      root.userData.zeroDivisionSourceAxes='-X=barrel/muzzle, Y=up, Z=lateral';
+      root.scale.setScalar(0.56);
+      const ss=sockets && sockets.sockets ? sockets.sockets : {};
+      const sv=(n)=>Array.isArray(ss[n]?.position) ? new THREE.Vector3(...ss[n].position) : null;
+      const muzzle=sv('muzzle');
+      const stock=sv('stock');
+      if(muzzle && stock){
+        const localForward=muzzle.clone().sub(stock).normalize();
+        const desiredForward=new THREE.Vector3(0,0,-1);
+        root.quaternion.setFromUnitVectors(localForward,desiredForward);
+      }else{
+        root.rotation.set(0,-Math.PI/2,0);
+      }
+      root.updateMatrixWorld(true);
+      root.userData.zeroDivisionSourceAxes='forward=stock→muzzle, desired=-Z';
       this.weaponModel=root;
       this.weaponSocketData=sockets && sockets.sockets ? sockets : {sockets:{}};
       this.weaponModelReady=true;
@@ -413,7 +424,7 @@ export class ZeroDivisionGame{
     this.handGroup.clear();
     const rp=this.getSocketInWeaponView('right_hand') || new THREE.Vector3(.10,-.35,-.65);
     const lp=this.getSocketInWeaponView('left_hand') || new THREE.Vector3(-.08,-.33,-1.0);
-    const rShoulder=new THREE.Vector3(.30,-.50,-.30), lShoulder=new THREE.Vector3(-.34,-.50,-.24);
+    const rShoulder=new THREE.Vector3(.18,-.34,-.28), lShoulder=new THREE.Vector3(-.16,-.34,-.26);
     const rElbow=rp.clone().lerp(rShoulder,.48), lElbow=lp.clone().lerp(lShoulder,.48);
     for(const [a,b,r] of [[rShoulder,rElbow,.068],[rElbow,rp,.058],[lShoulder,lElbow,.068],[lElbow,lp,.058]]){const arm=makeArm(a,b,r);if(arm)this.handGroup.add(arm);}
     this.handGroup.add(makeHand(lp,'left'));this.handGroup.add(makeHand(rp,'right'));
@@ -461,10 +472,11 @@ export class ZeroDivisionGame{
       this.weaponModel.visible=true;
       // Model-local coordinates stay untouched; all FPS placement happens at the viewmodel root.
       this.weaponModel.position.set(0,0,0);
-      this.weaponModel.rotation.set(0,-Math.PI/2,0);
-      this.weaponModel.scale.setScalar(.84);
+      // Preserve the orientation calculated during GLB load. Reassigning a fixed
+      // Euler rotation here was the source of the repeated reversed-view bug.
+      this.weaponModel.scale.setScalar(.56);
       this.weaponModel.updateMatrixWorld(true);
-      this.weaponGroup.position.set(.13,-.56,-.72);
+      this.weaponGroup.position.set(.30,-.36,-1.22);
       this.weaponGroup.rotation.set(0,0,0);
       if(!this.handGroup)this.addHands(); else this.attachHandsToWeaponModel();
       this.rebuildSocketDrivenAttachments();
@@ -726,11 +738,11 @@ export class ZeroDivisionGame{
     const adsLerp=this.ads?1:0;
     // Weapon view positions are camera-local. ADS is computed from the actual
     // optic socket, not a hard-coded point, so a future socket edit updates ADS automatically.
-    const normal=new THREE.Vector3(.16,-.22,-1.25);
+    const normal=new THREE.Vector3(.30,-.30,-1.20);
     let target=normal.clone();
     const adsAnchor=this.getAdsAnchor();
     if(adsAnchor){
-      const desiredSight=new THREE.Vector3(0,-.02,-.46);
+      const desiredSight=new THREE.Vector3(0,-.04,-.54);
       const adsTarget=desiredSight.sub(adsAnchor);
       target.lerp(adsTarget,adsLerp);
     }
@@ -786,7 +798,7 @@ export class ZeroDivisionGame{
     const map={KeyW:'W',KeyA:'A',KeyS:'S',KeyD:'D',Space:'SPACE',ShiftLeft:'SHIFT',ShiftRight:'SHIFT',ControlLeft:'CTRL',ControlRight:'CTRL',KeyQ:'Q',KeyE:'E',KeyR:'R',KeyH:'H',Digit1:'1',Digit2:'2',Digit3:'3',Digit4:'4',Digit0:'0'};
     return [...new Set(Object.entries(this.keys).filter(([,down])=>down).map(([code])=>map[code]||code.replace(/^Key/,'')))].join(' + ');
   }
-  updateDebug(){const p=this.playerPos,s=this.velocity.length();const txt=[`ZERO DIVISION // DEBUG`,`FPS: ${Math.round(this.currentFPS||0)}`,`POS: ${p.x.toFixed(2)} / ${this.camera.position.y.toFixed(2)} / ${p.z.toFixed(2)}`,`VEL: ${s.toFixed(2)} m/s`,`MAP: ${state.map}`,`ENEMIES: ${this.enemies.filter(e=>e.alive).length}/${this.enemies.length}`,`WEAPON: ${this.currentWeaponType}`,`AMMO: ${this.currentWeaponType==='melee'?'—':`${this.magAmmo[this.currentWeaponType]} / ${this.reserveAmmo[this.currentWeaponType]}`}`,`PING: ${this.ping} ms`,`PACKET LOSS: ${this.packetLoss.toFixed(1)} %`,`DRAW CALLS: ${this.renderer.info.render.calls}`,`TRIANGLES: ${this.renderer.info.render.triangles}`,`PIXEL RATIO: ${this.renderer.getPixelRatio().toFixed(2)}`,`DASH: ${this.dash}  CROUCH: ${this.crouch}  SLIDE: ${this.isSliding()}  ADS: ${this.ads}  LEAN: ${this.lean.toFixed(2)}`,`PRESSED: ${this.getPressedKeys()||'—'}`];document.getElementById('debug-lines').textContent=txt.join('\n')}
+  updateDebug(){const p=this.playerPos,s=this.velocity.length();const txt=[`ZERO DIVISION // DEBUG`,`FPS: ${Math.round(this.currentFPS||0)}`,`POS: ${p.x.toFixed(2)} / ${this.camera.position.y.toFixed(2)} / ${p.z.toFixed(2)}`,`VEL: ${s.toFixed(2)} m/s`,`MAP: ${state.map}`,`ENEMIES: ${this.enemies.filter(e=>e.alive).length}/${this.enemies.length}`,`WEAPON: ${this.currentWeaponType}`,`AMMO: ${this.currentWeaponType==='melee'?'—':`${this.magAmmo[this.currentWeaponType]} / ${this.reserveAmmo[this.currentWeaponType]}`}`,`PING: ${this.ping} ms`,`PACKET LOSS: ${this.packetLoss.toFixed(1)} %`,`DRAW CALLS: ${this.renderer.info.render.calls}`,`TRIANGLES: ${this.renderer.info.render.triangles}`,`PIXEL RATIO: ${this.renderer.getPixelRatio().toFixed(2)}`,`DASH: ${this.dash}  CROUCH: ${this.crouch}  SLIDE: ${this.isSliding()}  ADS: ${this.ads}  LEAN: ${this.lean.toFixed(2)}`,`VIEW YAW: ${(((this.yaw*180/Math.PI)%360)+360)%360).toFixed(1)}°`,`PRESSED: ${this.getPressedKeys()||'—'}`];document.getElementById('debug-lines').textContent=txt.join('\n')}
 
   render(){
     this.renderer.render(this.scene,this.camera);
