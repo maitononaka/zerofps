@@ -1,10 +1,12 @@
 # Zero Division V12
 
-Fixes the root cause of the fixed-world WASD bug and the M4A1 view-model/socket placement.
+V12 fixes the FPS view-model transform and movement-axis desynchronization.
 
-- Live pointer-lock yaw is synchronized into gameplay every frame.
-- M4A1 sockets are transformed from source GLB space into weapon-view space exactly once.
-- Hands are siblings of the weapon model, avoiding inherited transform drift.
-- Weapon position is anchored to the authored right-hand socket.
-- ADS is anchored to the authored optic socket.
-- Muzzle flash uses the authored muzzle socket.
+Key changes:
+- M4A1 is rendered from the authored GLB socket coordinate system.
+- Hands are siblings of the weapon model and are positioned from the JSON sockets after the model transform.
+- Optic/muzzle/stock sockets are transformed into the weapon-view coordinate space instead of being placed in source-model space.
+- Weapon view is anchored to the right-hand socket; ADS is anchored to the optic socket.
+- Horizontal movement reads the live Pointer Lock yaw every frame, so W/A/S/D follows the current view rather than the initial spawn direction.
+- Sliding uses the live view yaw when starting.
+- Compass follows the same yaw source.
