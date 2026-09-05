@@ -31,7 +31,7 @@ export class ZeroDivisionGame{
     this.renderer.toneMapping=THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure=1.15;
     this.renderer.shadowMap.enabled=state.settings.shadows;
-    this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type=THREE.PCFShadowMap;
     this.renderer.domElement.id='world-canvas';
     this.renderer.domElement.style.cssText='position:fixed;inset:0;width:100vw;height:100vh;z-index:0;display:none;pointer-events:none';
     document.getElementById('app').prepend(this.renderer.domElement);
@@ -419,10 +419,11 @@ export class ZeroDivisionGame{
     if(!this.weaponGroup)return;
     for(const c of [...this.weaponGroup.children]){
       if(c!==this.weaponModel && c!==this.handGroup){
-        c.traverse?.(o=>{o.geometry?.dispose?.();if(o.material){if(Array.isArray(o.material))o.material.forEach(m=>m.dispose?.());else o.material.dispose?.()}});
         this.weaponGroup.remove(c);
+        this.disposeObject3D(c);
       }
     }
+    if(this.weaponModel)this.clearWeaponAttachments(this.weaponModel);
     this.weaponSight=null;this.muzzleFlash=null;
     if(this.currentWeaponType==='melee'){
       const m=new THREE.MeshStandardMaterial({color:0x24292c,roughness:.5,metalness:.5});
@@ -458,6 +459,86 @@ export class ZeroDivisionGame{
     const sight=this.buildSight(state.sight);sight.position.set(.12,-.095,-1.13);this.weaponGroup.add(sight);this.weaponSight=sight;
     this.muzzleFlash=new THREE.Mesh(new THREE.SphereGeometry(.09,10,8),new THREE.MeshBasicMaterial({color:0xffe9a8,transparent:true,opacity:0,depthWrite:false}));this.muzzleFlash.position.set(.12,-.33,-2.58);this.weaponGroup.add(this.muzzleFlash);
     this.weaponGroup.position.set(.02,.015,0);
+  }
+  disposeObject3D(root){
+    root.traverse?.(o=>{
+      if(o.geometry) o.geometry.dispose?.();
+      if(o.material){
+        if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose?.());
+        else o.material.dispose?.();
+      }
+    });
+  }
+  clearWeaponAttachments(root){
+    for(const child of [...root.children]){
+      if(child.userData?.zdAttachment){
+        root.remove(child);
+        this.disposeObject3D(child);
+      }
+    }
+  }
+  buildSight(type='標準サイト'){
+    const g=new THREE.Group();
+    g.userData.zdAttachment=true;
+    const dark=new THREE.MeshStandardMaterial({color:0x15191b,roughness:.42,metalness:.6});
+    const glass=new THREE.MeshBasicMaterial({color:0x8cc7ff,transparent:true,opacity:.5,roughness:0,depthWrite:false});
+    if(type==='ドットサイト'){
+      const base=new THREE.Mesh(new THREE.BoxGeometry(.13,.035,.19),dark);
+      base.position.y=0; g.add(base);
+      const hood=new THREE.Mesh(new THREE.BoxGeometry(.10,.10,.12),dark);
+      hood.position.y=.065; g.add(hood);
+      const lens=new THREE.Mesh(new THREE.PlaneGeometry(.065,.052),glass);
+      lens.position.set(0,.065,-.062); g.add(lens);
+      const dot=new THREE.Mesh(new THREE.SphereGeometry(.008,8,6),new THREE.MeshBasicMaterial({color:0xff3344}));
+      dot.position.set(0,.065,-.068); g.add(dot);
+    } else if(type==='ホロ'){
+      const base=new THREE.Mesh(new THREE.BoxGeometry(.15,.04,.21),dark);g.add(base);
+      const frame=new THREE.Mesh(new THREE.BoxGeometry(.13,.13,.12),dark);frame.position.y=.07;g.add(frame);
+      const lens=new THREE.Mesh(new THREE.PlaneGeometry(.095,.065),glass);lens.position.set(0,.07,-.062);g.add(lens);
+    } else {
+      const rail=new THREE.Mesh(new THREE.BoxGeometry(.115,.03,.18),dark);g.add(rail);
+      const front=new THREE.Mesh(new THREE.BoxGeometry(.025,.11,.025),dark);front.position.set(0,.065,-.055);g.add(front);
+      const rear=new THREE.Mesh(new THREE.BoxGeometry(.025,.09,.025),dark);rear.position.set(0,.055,.055);g.add(rear);
+    }
+    return g;
+  }
+  buildMuzzle(type='標準'){
+    const g=new THREE.Group();
+    g.userData.zdAttachment=true;
+    const dark=new THREE.MeshStandardMaterial({color:0x161a1d,roughness:.5,metalness:.65});
+    let body;
+    if(type==='コンペンセータ'){
+      body=new THREE.Mesh(new THREE.CylinderGeometry(.06,.07,.16,12),dark);
+      body.rotation.x=Math.PI/2; g.add(body);
+      for(let i=-1;i<=1;i++){
+        const port=new THREE.Mesh(new THREE.BoxGeometry(.075,.016,.025),new THREE.MeshStandardMaterial({color:0x090b0c,roughness:1}));
+        port.position.set(0,.035,i*.045); g.add(port);
+      }
+    } else if(type==='静音モジュール'){
+      body=new THREE.Mesh(new THREE.CylinderGeometry(.075,.07,.28,14),dark);
+      body.rotation.x=Math.PI/2; g.add(body);
+      const ring=new THREE.Mesh(new THREE.CylinderGeometry(.08,.08,.025,14),dark);ring.rotation.x=Math.PI/2;ring.position.z=-.10;g.add(ring);
+    } else {
+      body=new THREE.Mesh(new THREE.CylinderGeometry(.05,.055,.11,12),dark);
+      body.rotation.x=Math.PI/2; g.add(body);
+    }
+    return g;
+  }
+  buildStock(type='標準'){
+    const g=new THREE.Group();
+    g.userData.zdAttachment=true;
+    const dark=new THREE.MeshStandardMaterial({color:0x1a2022,roughness:.62,metalness:.32});
+    if(type==='軽量'){
+      const tube=new THREE.Mesh(new THREE.BoxGeometry(.11,.11,.42),dark);tube.position.z=.16;g.add(tube);
+      const pad=new THREE.Mesh(new THREE.BoxGeometry(.16,.19,.08),dark);pad.position.set(0,-.02,.38);g.add(pad);
+    } else if(type==='安定'){
+      const body=new THREE.Mesh(new THREE.BoxGeometry(.17,.24,.38),dark);body.position.z=.16;g.add(body);
+      const pad=new THREE.Mesh(new THREE.BoxGeometry(.19,.24,.08),dark);pad.position.set(0,-.01,.37);g.add(pad);
+    } else {
+      const tube=new THREE.Mesh(new THREE.BoxGeometry(.14,.14,.34),dark);tube.position.z=.14;g.add(tube);
+      const pad=new THREE.Mesh(new THREE.BoxGeometry(.17,.20,.075),dark);pad.position.set(0,-.01,.34);g.add(pad);
+    }
+    return g;
   }
   getWeaponSocket(name){
     const s=this.weaponSocketData?.sockets?.[name];
