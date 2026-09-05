@@ -1,37 +1,10 @@
-# ZERO DIVISION v9
+# Zero Division V12
 
-Zero Division FPS prototype with a custom M4A1 GLB view-model.
+Fixes the root cause of the fixed-world WASD bug and the M4A1 view-model/socket placement.
 
-## Run
-
-Open the folder with VS Code Live Server or run `python -m http.server 8000`.
-
-## Controls
-
-- WASD: move
-- Mouse: look
-- CTRL: dash
-- SHIFT: hold crouch / slide when sprinting
-- SPACE: jump / slide-jump
-- RMB: ADS
-- Q / E: lean
-- R: reload
-- H: inspect
-- 1 / 2 / 3: primary / secondary / melee
-- 4: medkit
-- 0: debug overlay
-
-## v9 changes
-
-- Rebuilt first-person M4A1 pose around the imported GLB sockets.
-- Removed the old side-view reset that made the rifle render horizontally across the screen.
-- Normalized the M4A1 forward axis to -Z and tuned normal/ADS poses.
-- Repositioned left/right hands around the handguard and pistol grip.
-- Movement now uses the camera world-space forward/right vectors, so W/A/S/D remain consistent at every heading.
-- Slide direction uses the same camera-space movement basis.
-- ADS, lean, weapon bob and recoil continue to move the view-model as one assembly.
-- Debug overlay shows pressed keys only while debug is open.
-
-
-## V10
-Weapon normalization and camera-space movement were rebuilt: imported M4A1 is rotated/centered after scaling, view-model materials render consistently, arm pose is reduced, and WASD is calculated directly from look yaw to prevent heading-dependent reversal.
+- Live pointer-lock yaw is synchronized into gameplay every frame.
+- M4A1 sockets are transformed from source GLB space into weapon-view space exactly once.
+- Hands are siblings of the weapon model, avoiding inherited transform drift.
+- Weapon position is anchored to the authored right-hand socket.
+- ADS is anchored to the authored optic socket.
+- Muzzle flash uses the authored muzzle socket.

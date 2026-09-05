@@ -40,6 +40,9 @@ export class ZeroDivisionGame{
     this.yaw=0;this.pitch=0;
     this.playerPos=new THREE.Vector3(0,0,8);
     this.velocity=new THREE.Vector3();
+    this._moveForward=new THREE.Vector3();
+    this._moveRight=new THREE.Vector3();
+    this._moveWish=new THREE.Vector3();
     this.keys={};
     this.canJump=false;
     this.dash=false;this.crouch=false;this.slideTimer=0;this.slideVelocity=new THREE.Vector3();this.lean=0;this.ads=false;this.eyeY=1.72;this.visualBob=0;
@@ -146,8 +149,8 @@ export class ZeroDivisionGame{
     if(this.isSliding())return;
     const horizontal=new THREE.Vector3(this.velocity.x,0,this.velocity.z);
     if(horizontal.lengthSq()<1){
-      horizontal.copy(this.camera.getWorldDirection(new THREE.Vector3()));
-      horizontal.y=0;
+      const sy=Math.sin(this.controls.yaw),cy=Math.cos(this.controls.yaw);
+      horizontal.set(-sy,0,-cy);
       if(horizontal.lengthSq()<1e-8) horizontal.set(0,0,-1);
       horizontal.normalize();
     }else horizontal.normalize();
@@ -258,7 +261,7 @@ export class ZeroDivisionGame{
     this.addWeapon();this.addHands();this.updateWeaponModel();
     const spawns={city:[0,8],mountain:[0,4],interior:[0,8]};const s=spawns[state.map]||spawns.city;this.playerPos.set(s[0],this.groundHeightAt(s[0],s[1]),s[1]);this.velocity.set(0,0,0);this.slideVelocity.set(0,0,0);this.canJump=true;
     this.eyeY=this.playerPos.y+1.72;
-    this.camera.rotation.order='YXZ';this.camera.rotation.set(0,0,0);this.ads=false;this.updateCameraTransform(0);
+    this.camera.rotation.order='YXZ';this.camera.rotation.set(0,0,0);this.controls.yaw=0;this.controls.pitch=0;this.yaw=0;this.pitch=0;this.ads=false;this.updateCameraTransform(0);
     this.updateWeaponModel();
   }
 
@@ -356,70 +359,82 @@ export class ZeroDivisionGame{
         fetch('./assets/m4a1_sockets.json').then(r=>r.ok?r.json():{}).catch(()=>({}))
       ]);
       const root=gltf.scene;
-      root.traverse(o=>{if(o.isMesh){o.castShadow=false;o.receiveShadow=false;if(o.material){o.material.transparent=false;}}});
-      // Normalize once, in the correct order. The source GLB's long axis is local +X.
-      // Rotate first so the barrel points toward local -Z, then center the rotated/scaled mesh.
+      root.traverse(o=>{
+        if(o.isMesh){
+          o.castShadow=false;
+          o.receiveShadow=false;
+          if(o.material){o.material.transparent=false;o.material.depthWrite=true;}
+        }
+      });
+      // IMPORTANT: Do not recenter or otherwise bake a new coordinate system here.
+      // The socket editor authored positions in the source GLB coordinate system:
+      // X = barrel axis, Y = up, Z = lateral. The only view-model transform is
+      // a fixed -90deg Y rotation plus a uniform scale. Every socket is a child of
+      // this root, so the JSON positions remain exact through ADS/lean/recoil.
       root.rotation.set(0,-Math.PI/2,0);
-      root.scale.setScalar(1);
+      root.scale.setScalar(0.56);
       root.position.set(0,0,0);
       root.updateMatrixWorld(true);
-      const box0=new THREE.Box3().setFromObject(root);
-      const size=box0.getSize(new THREE.Vector3());
-      const maxLen=Math.max(size.x,size.y,size.z);
-      const scale=1.55/Math.max(maxLen,0.001);
-      root.scale.setScalar(scale);
-      root.updateMatrixWorld(true);
-      const box1=new THREE.Box3().setFromObject(root);
-      const center1=box1.getCenter(new THREE.Vector3());
-      root.position.sub(center1);
-      root.updateMatrixWorld(true);
+      root.userData.zeroDivisionSourceAxes='X=barrel/front, Y=up, Z=lateral';
       this.weaponModel=root;
-      this.weaponSocketData=sockets;
+      this.weaponSocketData=sockets && sockets.sockets ? sockets : {sockets:{}};
       this.weaponModelReady=true;
       return root;
     }catch(err){
       console.warn('M4A1 GLB load failed; using fallback view-model.',err);
-      this.weaponModel=null;this.weaponModelReady=false;return null;
+      this.weaponModel=null;
+      this.weaponModelReady=false;
+      this.weaponSocketData={sockets:{}};
+      return null;
     }
   }
 
   addHands(){
     this.handGroup=new THREE.Group();
-    this.handGroup.name='optimized-hands';
-    const sleeve=new THREE.MeshStandardMaterial({color:0x252d31,roughness:.95,metalness:0});
-    const glove=new THREE.MeshStandardMaterial({color:0x11171a,roughness:.88,metalness:.02});
-    const makeArm=(a,b,r=.07)=>{
+    this.handGroup.name='socket-driven-hands';
+    const sleeve=new THREE.MeshStandardMaterial({color:0x252d31,roughness:.96,metalness:0});
+    const glove=new THREE.MeshStandardMaterial({color:0x101519,roughness:.9,metalness:.02});
+    const sourceToView=(p)=>this.sourceSocketToView(p);
+    const makeArm=(a,b,r=.046)=>{
       const dir=new THREE.Vector3().subVectors(b,a),len=dir.length();
-      const m=new THREE.Mesh(new THREE.CapsuleGeometry(r,Math.max(.02,len-r*2),5,8),sleeve);
+      if(len<0.02)return null;
+      const m=new THREE.Mesh(new THREE.CapsuleGeometry(r,Math.max(.02,len-r*2),5,7),sleeve);
       m.position.copy(a).add(b).multiplyScalar(.5);
       m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dir.normalize());
       return m;
     };
-    const makeHand=(p,scale=1)=>{
+    const makeHand=(p,side)=>{
       const g=new THREE.Group();g.position.copy(p);
-      const palm=new THREE.Mesh(new THREE.SphereGeometry(.095,10,8),glove);palm.scale.set(1.0,.72,1.2);g.add(palm);
-      const thumb=new THREE.Mesh(new THREE.CapsuleGeometry(.028,.11,5,7),glove);thumb.position.set(-.07,-.01,-.015);thumb.rotation.z=-.65;g.add(thumb);
-      g.scale.setScalar(scale);return g;
+      g.rotation.set(0,side==='right'?.08:-.10,side==='right'?.12:-.12);
+      const palm=new THREE.Mesh(new THREE.SphereGeometry(.062,10,8),glove);
+      palm.scale.set(1.12,.72,1.35);g.add(palm);
+      const thumb=new THREE.Mesh(new THREE.CapsuleGeometry(.018,.065,4,6),glove);
+      thumb.position.set(side==='right'?.048:-.048,-.002,-.018);
+      thumb.rotation.z=side==='right'?-0.70:0.70;g.add(thumb);
+      return g;
     };
-    // Hands are authored in the weapon's local space so they stay attached through ADS/lean/recoil.
-    // First-person grip pose in weapon-local coordinates.  The right hand sits at the pistol grip
-    // and the left hand reaches the handguard, so both stay attached when ADS/lean/recoil moves the weapon.
-    this.handPoints={
-      // Local to the normalized M4A1: right hand on pistol grip, left hand on handguard.
-      right:{hand:new THREE.Vector3(.12,-.19,.19),elbow:new THREE.Vector3(.23,-.10,.38),shoulder:new THREE.Vector3(.34,.00,.50)},
-      left:{hand:new THREE.Vector3(-.10,-.03,-.34),elbow:new THREE.Vector3(-.22,.04,-.12),shoulder:new THREE.Vector3(-.34,.06,.36)}
-    };
-    for(const side of ['left','right']){
-      const p=this.handPoints[side];
-      this.handGroup.add(makeArm(p.shoulder,p.elbow,side==='right'?.075:.072));
-      this.handGroup.add(makeArm(p.elbow,p.hand,side==='right'?.066:.062));
-      this.handGroup.add(makeHand(p.hand,1.05));
+    const sockets=this.weaponSocketData?.sockets||{};
+    const rp=sockets.right_hand?.position||[.4273078399,-.0596219051,-.0005414840];
+    const lp=sockets.left_hand?.position||[-.2981378455,.0666362469,.0266994332];
+    const rightHand=sourceToView(new THREE.Vector3(...rp));
+    const leftHand=sourceToView(new THREE.Vector3(...lp));
+    // Hands are siblings of the weapon model. Their positions are transformed
+    // from the source GLB coordinates exactly once, so model rotation/scale can
+    // never pull the hands away from their authored sockets.
+    const rightElbow=rightHand.clone().add(new THREE.Vector3(.05,.18,.08));
+    const rightShoulder=rightHand.clone().add(new THREE.Vector3(.12,.30,.15));
+    const leftElbow=leftHand.clone().add(new THREE.Vector3(-.05,.18,.08));
+    const leftShoulder=leftHand.clone().add(new THREE.Vector3(-.02,.30,.14));
+    for(const [a,b,r] of [[rightShoulder,rightElbow,.052],[rightElbow,rightHand,.046],[leftShoulder,leftElbow,.052],[leftElbow,leftHand,.046]]){
+      const arm=makeArm(a,b,r);if(arm)this.handGroup.add(arm);
     }
-    this.weaponGroup?.add(this.handGroup);
-    this.handGroup.visible=state.settings.hands;
+    this.handGroup.add(makeHand(leftHand,'left'));
+    this.handGroup.add(makeHand(rightHand,'right'));
+    this.handGroup.visible=Boolean(state.settings.hands);
+    if(this.weaponGroup)this.weaponGroup.add(this.handGroup);
   }
 
-  addWeapon(){
+  addWeapon(){  addWeapon(){
     this.weaponGroup=new THREE.Group();
     this.weaponGroup.name='viewmodel-weapon';
     this.camera.add(this.weaponGroup);
@@ -428,58 +443,86 @@ export class ZeroDivisionGame{
   updateWeaponModel(){
     if(!this.weaponGroup)return;
     for(const c of [...this.weaponGroup.children]){
-      if(c!==this.weaponModel && c!==this.handGroup){
-        this.weaponGroup.remove(c);
-        this.disposeObject3D(c);
-      }
+      if(c!==this.weaponModel && c!==this.handGroup){this.weaponGroup.remove(c);this.disposeObject3D(c);}
     }
-    if(this.weaponModel)this.clearWeaponAttachments(this.weaponModel);
+    for(const c of [...this.weaponGroup.children]){
+      if(c.userData?.zdAttachment){this.weaponGroup.remove(c);this.disposeObject3D(c);}
+    }
     this.weaponSight=null;this.muzzleFlash=null;
+    if(this.weaponModel)this.weaponModel.visible=false;
+    if(this.handGroup)this.handGroup.visible=false;
+
     if(this.currentWeaponType==='melee'){
       const m=new THREE.MeshStandardMaterial({color:0x24292c,roughness:.5,metalness:.5});
-      const blade=new THREE.Mesh(new THREE.BoxGeometry(.09,.48,.06),m);blade.position.set(.12,-.30,-.72);blade.rotation.z=-.18;this.weaponGroup.add(blade);
-      return;
+      const blade=new THREE.Mesh(new THREE.BoxGeometry(.08,.42,.045),m);blade.position.set(.12,-.27,-.65);blade.rotation.z=-.18;this.weaponGroup.add(blade);return;
     }
+
     if(this.weaponModelReady&&this.weaponModel&&this.currentWeaponType==='primary'&&state.primary==='M4A1'){
       if(this.weaponModel.parent!==this.weaponGroup)this.weaponGroup.add(this.weaponModel);
       this.weaponModel.visible=true;
       this.weaponModel.position.set(0,0,0);
-      this.weaponModel.rotation.set(0,0,0);
-
-      // The imported model has already been normalized: -Z = barrel/front, +Z = stock/rear.
-      // Keep the sockets in that same local coordinate system.
-      const optics=this.buildSight(state.sight);
-      optics.position.copy(this.getWeaponSocket('optic'));
-      this.weaponModel.add(optics);
-      this.weaponSight=optics;
-
-      const muzzle=this.buildMuzzle(state.muzzle);
-      muzzle.position.copy(this.getWeaponSocket('muzzle'));
-      this.weaponModel.add(muzzle);
-
-      this.muzzleFlash=new THREE.Mesh(
-        new THREE.SphereGeometry(.085,10,8),
-        new THREE.MeshBasicMaterial({color:0xffe7a0,transparent:true,opacity:0,depthWrite:false})
-      );
-      this.muzzleFlash.position.copy(this.getWeaponSocket('muzzle')).add(new THREE.Vector3(0,0,-.06));
-      this.weaponModel.add(this.muzzleFlash);
+      this.weaponModel.rotation.set(0,-Math.PI/2,0);
+      this.weaponModel.scale.setScalar(.56);
+      this.weaponModel.updateMatrixWorld(true);
+      if(this.handGroup?.parent!==this.weaponGroup)this.weaponGroup.add(this.handGroup);
+      this.rebuildSocketDrivenAttachments();
       return;
     }
-    // Lightweight procedural fallback for the other weapons.
+
     const name=this.currentWeaponType==='primary'?state.primary:state.secondary;
     const data=(this.currentWeaponType==='primary'?WEAPONS.primary:WEAPONS.secondary)[name]||WEAPONS.primary.M4A1;
-    const dark=new THREE.MeshStandardMaterial({color:data.color,roughness:.55,metalness:.28});const matte=new THREE.MeshStandardMaterial({color:0x343b3e,roughness:.85});
+    const dark=new THREE.MeshStandardMaterial({color:data.color,roughness:.55,metalness:.28});
+    const matte=new THREE.MeshStandardMaterial({color:0x343b3e,roughness:.85});
     const receiver=new THREE.Mesh(new THREE.BoxGeometry(.37,.26,1.03),dark);receiver.position.set(.12,-.37,-.86);this.weaponGroup.add(receiver);
     const handguard=new THREE.Mesh(new THREE.BoxGeometry(.31,.20,.78),matte);handguard.position.set(.12,-.32,-1.65);this.weaponGroup.add(handguard);
     const barrel=new THREE.Mesh(new THREE.CylinderGeometry(.042,.055,.72,14),dark);barrel.rotation.x=Math.PI/2;barrel.position.set(.12,-.33,-2.08);this.weaponGroup.add(barrel);
-    const muzzle=this.buildMuzzle(state.muzzle);muzzle.position.set(.12,-.33,-2.44);this.weaponGroup.add(muzzle);
+    if(state.muzzle && state.muzzle!=='なし'){const muzzle=this.buildMuzzle(state.muzzle);if(muzzle){muzzle.position.set(.12,-.33,-2.44);this.weaponGroup.add(muzzle);}}
     const grip=new THREE.Mesh(new THREE.BoxGeometry(.17,.47,.19),dark);grip.rotation.x=-.18;grip.position.set(.20,-.59,-.61);this.weaponGroup.add(grip);
-    const stock=this.buildStock(state.stock);stock.position.set(.12,-.38,-.12);this.weaponGroup.add(stock);
+    if(state.stock && state.stock!=='なし'){const stock=this.buildStock(state.stock);if(stock){stock.position.set(.12,-.38,-.12);this.weaponGroup.add(stock);}}
     const rail=new THREE.Mesh(new THREE.BoxGeometry(.18,.035,.62),matte);rail.position.set(.12,-.17,-1.06);this.weaponGroup.add(rail);
-    const sight=this.buildSight(state.sight);sight.position.set(.12,-.095,-1.13);this.weaponGroup.add(sight);this.weaponSight=sight;
+    if(state.sight && state.sight!=='なし'){const sight=this.buildSight(state.sight);if(sight){sight.position.set(.12,-.095,-1.13);this.weaponGroup.add(sight);this.weaponSight=sight;}}
     this.muzzleFlash=new THREE.Mesh(new THREE.SphereGeometry(.09,10,8),new THREE.MeshBasicMaterial({color:0xffe9a8,transparent:true,opacity:0,depthWrite:false}));this.muzzleFlash.position.set(.12,-.33,-2.58);this.weaponGroup.add(this.muzzleFlash);
     this.weaponGroup.position.set(.02,.015,0);
   }
+  sourceSocketToView(p){
+    const v=p.clone();
+    const q=this.weaponModel?.quaternion||new THREE.Quaternion().setFromEuler(new THREE.Euler(0,-Math.PI/2,0));
+    const scale=this.weaponModel?.scale?.x||.56;
+    v.multiplyScalar(scale).applyQuaternion(q);
+    return v;
+  }
+  transformSocketToViewLocal(name){const v=this.getSocketVector(name);return v?this.sourceSocketToView(v):null;}
+  rebuildSocketDrivenAttachments(){
+    const model=this.weaponModel;if(!model||!this.weaponGroup)return;
+    const sockets=this.weaponSocketData?.sockets||{};
+    const canUse=name=>Boolean(sockets[name]?.enabled!==false);
+    const addSocketed=(name,buildFn,stateValue)=>{
+      if(!stateValue||stateValue==='なし'||!canUse(name))return null;
+      const obj=buildFn.call(this,stateValue);if(!obj)return null;
+      const s=sockets[name];obj.userData.zdAttachment=true;
+      obj.position.copy(this.transformSocketToViewLocal(name)||new THREE.Vector3());
+      const q=new THREE.Quaternion();
+      if(Array.isArray(s.rotation)&&s.rotation.length===3)q.setFromEuler(new THREE.Euler(s.rotation[0],s.rotation[1],s.rotation[2],'XYZ'));
+      obj.quaternion.copy(model.quaternion).multiply(q);
+      if(Array.isArray(s.scale)&&s.scale.length===3)obj.scale.set(s.scale[0]*10,s.scale[1]*10,s.scale[2]*10);
+      if(name==='muzzle'||name==='stock')obj.rotateY(Math.PI/2);
+      this.weaponGroup.add(obj);return obj;
+    };
+    if(state.sight && state.sight!=='なし')this.weaponSight=addSocketed('optic',this.buildSight,state.sight);
+    addSocketed('muzzle',this.buildMuzzle,state.muzzle);
+    addSocketed('stock',this.buildStock,state.stock);
+    this.muzzleFlash=new THREE.Mesh(new THREE.SphereGeometry(.07,10,8),new THREE.MeshBasicMaterial({color:0xffe7a0,transparent:true,opacity:0,depthWrite:false}));
+    const muzzle=this.transformSocketToViewLocal('muzzle')||new THREE.Vector3(0,0,-1);
+    this.muzzleFlash.position.copy(muzzle).add(new THREE.Vector3(0,0,-.075));
+    this.muzzleFlash.userData.zdAttachment=true;this.weaponGroup.add(this.muzzleFlash);
+  }
+  getSocketVector(name){  getSocketVector(name){
+    const s=this.weaponSocketData?.sockets?.[name];
+    if(!s||s.enabled===false||!Array.isArray(s.position))return null;
+    return new THREE.Vector3(s.position[0],s.position[1],s.position[2]);
+  }
+  getSocketInWeaponView(name){return this.transformSocketToViewLocal(name);}
+
   disposeObject3D(root){
     root.traverse?.(o=>{
       if(o.geometry) o.geometry.dispose?.();
@@ -497,7 +540,8 @@ export class ZeroDivisionGame{
       }
     }
   }
-  buildSight(type='標準サイト'){
+  buildSight(type='なし'){
+    if(!type || type==='なし')return null;
     const g=new THREE.Group();
     g.userData.zdAttachment=true;
     const dark=new THREE.MeshStandardMaterial({color:0x15191b,roughness:.42,metalness:.6});
@@ -522,7 +566,8 @@ export class ZeroDivisionGame{
     }
     return g;
   }
-  buildMuzzle(type='標準'){
+  buildMuzzle(type='なし'){
+    if(!type || type==='なし')return null;
     const g=new THREE.Group();
     g.userData.zdAttachment=true;
     const dark=new THREE.MeshStandardMaterial({color:0x161a1d,roughness:.5,metalness:.65});
@@ -544,7 +589,8 @@ export class ZeroDivisionGame{
     }
     return g;
   }
-  buildStock(type='標準'){
+  buildStock(type='なし'){
+    if(!type || type==='なし')return null;
     const g=new THREE.Group();
     g.userData.zdAttachment=true;
     const dark=new THREE.MeshStandardMaterial({color:0x1a2022,roughness:.62,metalness:.32});
@@ -559,11 +605,6 @@ export class ZeroDivisionGame{
       const pad=new THREE.Mesh(new THREE.BoxGeometry(.17,.20,.075),dark);pad.position.set(0,-.01,.34);g.add(pad);
     }
     return g;
-  }
-  getWeaponSocket(name){
-    const s=this.weaponSocketData?.sockets?.[name];
-    if(!s)return new THREE.Vector3();
-    return new THREE.Vector3(...s.position);
   }
 
   fire(){
@@ -594,6 +635,9 @@ export class ZeroDivisionGame{
 
   update(dt){
     if(!this.running||this.paused)return;
+    // Keep gameplay movement synchronized with the live pointer-lock view.
+    this.yaw=this.controls.yaw;
+    this.pitch=this.controls.pitch;
     if(state.settings.dashMode==='hold')this.dash=!!(this.keys.ControlLeft||this.keys.ControlRight);
     if(state.settings.crouchMode==='hold'&&!this.isSliding())this.crouch=!!(this.keys.ShiftLeft||this.keys.ShiftRight);
 
@@ -618,12 +662,13 @@ export class ZeroDivisionGame{
       const speed=this.crouch?2.35:(this.dash?8.4:4.6);
       let f=(this.keys.KeyW?1:0)-(this.keys.KeyS?1:0),r=(this.keys.KeyD?1:0)-(this.keys.KeyA?1:0);
       const len=Math.hypot(f,r);if(len>0){f/=len;r/=len;}
-      // Movement is derived directly from the look yaw, never from the camera quaternion.
-      // This keeps W/A/S/D stable even while pitch, lean roll, ADS or camera smoothing is active.
-      const sy=Math.sin(this.yaw), cy=Math.cos(this.yaw);
-      const forward=new THREE.Vector3(-sy,0,-cy);
-      const side=new THREE.Vector3(cy,0,-sy);
-      const wish=forward.multiplyScalar(f).add(side.multiplyScalar(r));
+      // The camera's pitch/roll must never affect horizontal movement.
+      // `this.yaw` is the single source of truth for horizontal view direction.
+      // At yaw=0, W points toward world -Z; turning right makes W rotate with the view.
+      const sy=Math.sin(this.yaw),cy=Math.cos(this.yaw);
+      const forward=this._moveForward.set(-sy,0,-cy);
+      const side=this._moveRight.set(cy,0,-sy);
+      const wish=this._moveWish.copy(forward).multiplyScalar(f).addScaledVector(side,r);
       if(len>0)wish.multiplyScalar(speed);
       const accel=len>0?(this.crouch?15:18):24;
       this.velocity.x=THREE.MathUtils.damp(this.velocity.x,len>0?wish.x:0,accel,dt);
@@ -681,33 +726,36 @@ export class ZeroDivisionGame{
   updateWeaponAnimation(dt,moving){
     if(!this.weaponGroup)return;
     const t=performance.now()*.001;
-    const bob=moving?Math.sin(t*(this.dash?14:10))*(this.dash?.035:.018):0;
+    const bob=moving?Math.sin(t*(this.dash?14:10))*(this.dash?.018:.009):0;
     const adsLerp=this.ads?1:0;
-    // Grounded rifle carry. The normalized M4's optic socket is at local (0,.145,-.18).
-    // In ADS we place that socket close to the camera centerline instead of merely changing FOV.
-    const normal=new THREE.Vector3(.22,-.18,-.86);
-    const ads=new THREE.Vector3(0.00,-.055,-.52);
-    let x=THREE.MathUtils.lerp(normal.x,ads.x,adsLerp)+this.lean*.11;
-    let y=THREE.MathUtils.lerp(normal.y,ads.y,adsLerp)+bob*.45;
-    let z=THREE.MathUtils.lerp(normal.z,ads.z,adsLerp);
-    let rx=this.weaponKick;
-    if(this.isSliding())y-=.12;
-    if(this.reloading){const p=1-Math.max(0,this.reloadTimer)/((this.currentWeaponType==='primary'?WEAPONS.primary[state.primary]:WEAPONS.secondary[state.secondary]).reload);const wave=Math.sin(Math.min(1,p)*Math.PI);x-=wave*.10;y-=wave*.14;rx=.28+wave*.10;}
-    if(this.inspecting){const p=1-Math.max(0,this.inspectTimer)/1.8;const wave=Math.sin(Math.min(1,p)*Math.PI);x+=.20*wave;y+=.10*wave;rx=.18*wave;this.weaponGroup.rotation.y=.32*wave;}else this.weaponGroup.rotation.y=0;
-    this.weaponGroup.position.set(x,y,z);
-    this.weaponGroup.rotation.x=rx + THREE.MathUtils.lerp(-.045,0,adsLerp);
-    this.weaponGroup.rotation.y=THREE.MathUtils.lerp(-.03,0,adsLerp);
-    this.weaponGroup.rotation.z=-this.lean*.30;
-    this.weaponKick=THREE.MathUtils.damp(this.weaponKick,0,18,dt);
-    if(this.handGroup){
-      this.handGroup.visible=state.settings.hands;
-      this.handGroup.rotation.z=0;
-      this.handGroup.rotation.x=0;
-      this.handGroup.position.set(0,0,0);
-      this.handGroup.scale.setScalar(.92);
+    const rightSocket=this.transformSocketToViewLocal('right_hand')||new THREE.Vector3(.24,-.03,.24);
+    const normalDesiredRight=new THREE.Vector3(.18,-.34,-.86);
+    const normalGroup=normalDesiredRight.clone().sub(rightSocket);
+    let target=normalGroup;
+    const opticLocal=this.transformSocketToViewLocal('optic');
+    if(opticLocal){
+      const desiredOptic=new THREE.Vector3(0,-.045,-.68);
+      const adsGroup=desiredOptic.clone().sub(opticLocal);
+      target=normalGroup.clone().lerp(adsGroup,adsLerp);
     }
+    target.x+=this.lean*.025;target.y+=bob*.28;
+    if(this.isSliding())target.y-=.08;
+    if(this.reloading){
+      const base=this.currentWeaponType==='primary'?WEAPONS.primary[state.primary]:WEAPONS.secondary[state.secondary];
+      const p=1-Math.max(0,this.reloadTimer)/(base?.reload||1.3),wave=Math.sin(Math.min(1,p)*Math.PI);
+      target.x-=wave*.035;target.y-=wave*.06;
+    }
+    if(this.inspecting){
+      const p=1-Math.max(0,this.inspectTimer)/1.8,wave=Math.sin(Math.min(1,p)*Math.PI);
+      target.x+=.10*wave;target.y+=.05*wave;this.weaponGroup.rotation.y=.18*wave;
+    }else this.weaponGroup.rotation.y=0;
+    this.weaponGroup.position.copy(target);
+    this.weaponGroup.rotation.x=this.weaponKick+THREE.MathUtils.lerp(-.018,0,adsLerp);
+    this.weaponGroup.rotation.z=-this.lean*.20;
+    this.weaponKick=THREE.MathUtils.damp(this.weaponKick,0,18,dt);
+    if(this.handGroup)this.handGroup.visible=Boolean(state.settings.hands&&this.currentWeaponType!=='melee'&&this.weaponModel?.visible);
   }
-  updateEnemies(dt){
+  updateEnemies(dt){  updateEnemies(dt){
     const now=performance.now()*.00055;this.enemies.forEach((e,i)=>{if(!e.alive){e.respawn-=dt;if(e.respawn<=0){e.alive=true;e.hp=100;e.group.visible=true;e.group.position.copy(e.origin)}return}const x=e.origin.x+Math.sin(now+e.phase)*2.2,z=e.origin.z+Math.cos(now*.92+e.phase)*2.2;e.group.position.x=x;e.group.position.z=z;e.group.position.y=this.groundHeightAt(x,z);e.group.rotation.y=Math.sin(now+e.phase)*.3});
   }
   updateEffects(dt){for(let i=this.bulletHoles.length-1;i>=0;i--){const h=this.bulletHoles[i];h.ttl-=dt;if(h.ttl<=0){this.scene.remove(h.mesh);h.mesh.geometry.dispose();h.mesh.material.dispose();this.bulletHoles.splice(i,1)}}}
@@ -715,8 +763,21 @@ export class ZeroDivisionGame{
   updateHUD(){
     const stance=this.isSliding()?'スライド':(this.crouch?'しゃがみ':'立ち');document.getElementById('stance').textContent=stance;document.getElementById('drive').textContent=this.dash?'ダッシュ':this.isMoving()?'歩行':'停止';document.getElementById('hud-state').textContent=this.reloading?'リロード中':this.inspecting?'点検中':this.ads?'ADS':this.isSliding()?'スライド':this.dash?'高速移動':'準備完了';document.getElementById('enemy-counter').textContent=String(this.enemies.filter(e=>e.alive).length);
     const weaponName=this.currentWeaponType==='primary'?state.primary:this.currentWeaponType==='secondary'?state.secondary:state.melee;document.getElementById('weapon-hud').textContent=weaponName;document.getElementById('ammo-value').textContent=this.currentWeaponType==='melee'?'—':`${this.magAmmo[this.currentWeaponType]} / ${this.reserveAmmo[this.currentWeaponType]}`;document.getElementById('fire-mode').textContent=this.currentWeaponType==='melee'?'近接':this.currentWeaponType==='primary'?'連射':'半自動';
-    const hp=document.getElementById('hp-fill');if(hp)hp.style.width=`${this.health}%`;const hv=document.getElementById('hp-value');if(hv)hv.textContent=Math.round(this.health);const sv=document.getElementById('stamina-fill');if(sv)sv.style.width=`${this.stamina}%`;const st=document.getElementById('stamina-value');if(st)st.textContent=Math.round(this.stamina);document.getElementById('ping').textContent=`${this.ping} ms`;document.getElementById('packet-loss').textContent=`${this.packetLoss.toFixed(1)} %`;
+    const hp=document.getElementById('hp-fill');if(hp)hp.style.width=`${this.health}%`;const hv=document.getElementById('hp-value');if(hv)hv.textContent=Math.round(this.health);const sv=document.getElementById('stamina-fill');if(sv)sv.style.width=`${this.stamina}%`;const st=document.getElementById('stamina-value');if(st)st.textContent=Math.round(this.stamina);document.getElementById('ping').textContent=`${this.ping} ms`;document.getElementById('packet-loss').textContent=`${this.packetLoss.toFixed(1)} %`;this.updateCompass();
   }
+  updateCompass(){
+    const wrap=document.getElementById('compass');if(!wrap)return;
+    wrap.classList.toggle('hidden',!state.settings.compass);
+    if(!state.settings.compass)return;
+    const deg=(this.yaw*180/Math.PI%360+360)%360;
+    const headingEl=document.getElementById('compass-heading');if(headingEl)headingEl.textContent=String(Math.round(deg)).padStart(3,'0')+'°';
+    const strip=document.getElementById('compass-strip');if(!strip)return;
+    const labels=['N','NE','E','SE','S','SW','W','NW'];
+    const center=Math.round(deg/22.5)*22.5;
+    const items=[];for(let i=-2;i<=2;i++){const d=(center+i*22.5+360)%360;items.push(labels[Math.round(d/45)%8]);}
+    strip.textContent=items.join('     ');
+  }
+
   getPressedKeys(){
     const map={KeyW:'W',KeyA:'A',KeyS:'S',KeyD:'D',Space:'SPACE',ShiftLeft:'SHIFT',ShiftRight:'SHIFT',ControlLeft:'CTRL',ControlRight:'CTRL',KeyQ:'Q',KeyE:'E',KeyR:'R',KeyH:'H',Digit1:'1',Digit2:'2',Digit3:'3',Digit4:'4',Digit0:'0'};
     return [...new Set(Object.entries(this.keys).filter(([,down])=>down).map(([code])=>map[code]||code.replace(/^Key/,'')))].join(' + ');

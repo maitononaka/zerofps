@@ -1,66 +1,120 @@
 {
+  "format": "zero-division-sockets-v2",
   "model": "m4a1.glb",
-  "version": 2,
   "sockets": {
-    "muzzle": {
-      "position": [
-        0,
-        0,
-        -0.775
-      ],
-      "rotation": [
-        0,
-        0,
-        0
-      ]
-    },
     "optic": {
+      "kind": "attachment",
       "position": [
-        0,
-        0.145,
-        -0.18
+        0.2382713207344661,
+        0.32746652998873527,
+        0.015370588034458454
       ],
       "rotation": [
         0,
         0,
         0
-      ]
+      ],
+      "scale": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "enabled": true
     },
-    "grip": {
+    "muzzle": {
+      "kind": "attachment",
       "position": [
-        0,
-        -0.19,
-        0.19
+        -1.069380957694478,
+        0.16206830462932165,
+        0.012279767415626714
       ],
       "rotation": [
         0,
         0,
         0
-      ]
+      ],
+      "scale": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "enabled": true
+    },
+    "foregrip": {
+      "kind": "attachment",
+      "position": [
+        -0.2864270520829737,
+        0.06312907600187996,
+        0.025814898747877506
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "enabled": true
     },
     "stock": {
+      "kind": "attachment",
       "position": [
-        0,
-        -0.02,
-        0.69
+        0.533256111762674,
+        0.16834420267167982,
+        0.03435845817422119
       ],
       "rotation": [
         0,
         0,
         0
-      ]
+      ],
+      "scale": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "enabled": true
     },
-    "handguard": {
+    "left_hand": {
+      "kind": "hand",
       "position": [
-        0,
-        0,
-        -0.38
+        -0.2981378455088557,
+        0.06663624689087308,
+        0.026699433159212155
       ],
       "rotation": [
         0,
         0,
         0
-      ]
+      ],
+      "scale": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "enabled": true
+    },
+    "right_hand": {
+      "kind": "hand",
+      "position": [
+        0.4273078399339672,
+        -0.05962190511288659,
+        -0.0005414840493945672
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "enabled": true
     }
   }
 }

@@ -76,3 +76,8 @@ canvas{display:block}
 .screen.active { pointer-events: auto; }
 #deploy-screen, #loadout-screen, #settings-screen, #staging-screen { position: absolute; }
 .deploy-actions, .deploy-actions button, .panel, .panel button, .choices, .choice, .settings-card, .settings-card input, .settings-card select, .map-list, .map-option, .mission-card, #deploy-btn, #go-staging, .loadout-footer { pointer-events: auto; }
+.compass{position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:24;width:360px;padding:7px 14px 8px;border:1px solid rgba(185,255,69,.45);background:rgba(7,12,15,.68);backdrop-filter:blur(5px);text-align:center;pointer-events:none;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.16em}
+.compass.hidden{display:none}
+.compass-heading{font-size:11px;color:#d9ff5f;font-weight:700;letter-spacing:.1em}
+.compass-notch{width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:7px solid #d9ff5f;margin:4px auto 3px}
+.compass-strip{font-size:10px;color:#d8e0e0;white-space:pre;letter-spacing:.28em}

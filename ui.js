@@ -1,8 +1,8 @@
 export const state = {
   screen:'deploy-screen',map:'city',bots:6,
   armor:'ライト',helmet:'偵察',primary:'M4A1',secondary:'P320',melee:'タクティカルナイフ',utility:'救急キット',
-  muzzle:'標準',stock:'標準',sight:'ドットサイト',
-  settings:{dashMode:'toggle',crouchMode:'toggle',hands:true,sensitivity:1,shake:.35,pixelRatio:1.5,shadows:true,sky:true}
+  muzzle:'なし',stock:'なし',sight:'なし',
+  settings:{dashMode:'toggle',crouchMode:'toggle',hands:true,compass:true,sensitivity:1,shake:.35,pixelRatio:1.5,shadows:true,sky:true}
 };
 
 export const DATA={
