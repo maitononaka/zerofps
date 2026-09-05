@@ -71,5 +71,8 @@ canvas{display:block}
 .operator-doll{width:130px;height:310px;position:relative;filter:drop-shadow(0 14px 18px #000)}.d-head{position:absolute;left:47px;top:22px;width:36px;height:36px;border-radius:50%;background:#c9b8a6;border:4px solid #222}.d-helmet{position:absolute;left:39px;top:14px;width:52px;height:23px;border-radius:13px 13px 4px 4px;border:4px solid #1f2529}.d-body{position:absolute;left:32px;top:63px;width:66px;height:90px;border-radius:18px 18px 13px 13px;border:4px solid #20262a}.d-arm{position:absolute;top:72px;width:20px;height:70px;border-radius:9px;background:#364249}.a1{left:19px;transform:rotate(8deg)}.a2{right:19px;transform:rotate(-8deg)}.d-leg{position:absolute;top:149px;width:20px;height:100px;border-radius:10px;background:#263037}.l1{left:43px;transform:rotate(6deg)}.l2{left:67px;transform:rotate(-6deg)}
 @media(max-width:900px){.attachment-grid{grid-template-columns:1fr}.ammo-count{font-size:20px}}
 
-/* v0.9.2: menu must always receive pointer input */
-.screen{z-index:10;pointer-events:none}.screen.active{pointer-events:auto}.screen button,.screen input,.screen select{pointer-events:auto}.geo{pointer-events:none}
+/* v0.9.2 UI interaction safety */
+.screen { pointer-events: none; }
+.screen.active { pointer-events: auto; }
+#deploy-screen, #loadout-screen, #settings-screen, #staging-screen { position: absolute; }
+.deploy-actions, .deploy-actions button, .panel, .panel button, .choices, .choice, .settings-card, .settings-card input, .settings-card select, .map-list, .map-option, .mission-card, #deploy-btn, #go-staging, .loadout-footer { pointer-events: auto; }

@@ -1,30 +1,22 @@
-# ZERO DIVISION v0.9.2
+# ZERO DIVISION v0.9.4
 
-Browser FPS prototype built with Three.js.
+- Menu UI is fully self-contained in `index.html`.
+- The menu no longer depends on `main.js` or `ui.js` loading successfully.
+- Three.js/game code is loaded only after pressing Deploy.
+- `game.js` reads the shared state from `window.ZERO_DIVISION_STATE`.
+- Favicon request is replaced with an inline data icon to avoid favicon 404 noise.
 
-## Launch
+Run with Live Server or:
+
 ```bash
 python -m http.server 8000
 ```
-Open http://127.0.0.1:8000/
 
-## Controls
-WASD move / Mouse look / CTRL sprint / SHIFT crouch / Q,E lean / SPACE jump
-1 main / 2 secondary / 3 melee / 4 med kit / R reload / H inspect / 0 debug / ESC pause
+Then open `http://127.0.0.1:8000/`.
 
-## v0.9.2
-- Sprint drops to walk when movement stops
-- Sliding ends in standing state
-- Higher jump
-- Mountain map uses a real height-field style forest terrain and terrain-aware player height
-- Human-shaped training targets with damage and timed respawn
-- Visible tracers and temporary impact marks
-- Reload and inspection animations
-- Dot / holo / standard sight selection
-- Muzzle and stock attachment selection
-- 1/2/3 weapon switching; 4 keeps the med kit
-- No gameplay hotbar
-- ESC pause can resume by clicking the pause panel
 
-- Menu UI now binds before the Three.js game module is initialized, preventing a game initialization error from disabling the deploy/loadout/settings buttons.
-- Active menu screens explicitly receive pointer input above the WebGL canvas.
+## v0.7 audio update
+- Added `assets/m4a1.ogg` as the primary firearm firing sound.
+- Other firearm types reuse the same sample with different playback rates: M4A1 1.00x, AKM 0.86x, SMG45 1.16x, P320 1.07x, G18 1.30x.
+- Melee keeps the synthetic impact tone.
+- Audio is triggered only by in-game user interaction and gracefully ignores blocked playback.

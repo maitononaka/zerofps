@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { state, go } from '../ui.js';
+const state = window.ZERO_DIVISION_STATE; const go = window.ZERO_DIVISION_GO || ((id)=>{document.querySelectorAll('.screen').forEach(x=>x.classList.remove('active'));document.getElementById(id)?.classList.add('active');});
 
 const V3 = new THREE.Vector3();
 const V3B = new THREE.Vector3();
@@ -40,7 +40,7 @@ export class ZeroDivisionGame{
     this.velocity=new THREE.Vector3();
     this.keys={};
     this.canJump=false;
-    this.dash=false;this.crouch=false;this.slideTimer=0;this.lean=0;
+    this.dash=false;this.crouch=false;this.slideTimer=0;this.slideVelocity=new THREE.Vector3();this.lean=0;this.ads=false;this.eyeY=1.72;this.visualBob=0;
     this.running=false;this.paused=false;this.debug=false;
     this.health=100;this.stamina=100;
     this.firing=false;this.fireCooldown=0;this.weaponKick=0;
@@ -52,6 +52,10 @@ export class ZeroDivisionGame{
     this.mapGroup=null;this.handGroup=null;this.weaponGroup=null;this.weaponSight=null;this.muzzleFlash=null;
     this.lastFrameTime=performance.now();this.currentFPS=60;
     this.ping=24;this.packetLoss=0;this.audioCtx=null;
+    this.gunAudio=new Audio('./assets/m4a1.ogg');
+    this.gunAudio.preload='auto';
+    this.gunAudio.volume=.72;
+    this.gunAudio.load();
     this.terrainMesh=null;
     this.previewScene=null;this.previewCamera=null;this.previewRenderer=null;this.previewGroup=null;
 
@@ -70,6 +74,7 @@ export class ZeroDivisionGame{
     addEventListener('keyup',e=>this.onKey(e,false));
     addEventListener('mousedown',e=>this.onMouseDown(e));
     addEventListener('mouseup',e=>this.onMouseUp(e));
+    addEventListener('contextmenu',e=>{if(this.running)e.preventDefault();});
     this.controls.addEventListener('lock',()=>{
       this.paused=false;
       document.getElementById('pause-card')?.classList.add('hidden');
@@ -92,22 +97,38 @@ export class ZeroDivisionGame{
   }
 
   onMouseDown(e){
-    if(e.button!==0||!this.running||!this.controls.isLocked||this.paused)return;
+    if(!this.running||this.paused)return;
+    if(e.button===2){
+      if(this.controls.isLocked){this.ads=true;this.updateHUD();}
+      return;
+    }
+    if(e.button!==0||!this.controls.isLocked)return;
     this.firing=true;
-    if(this.currentWeaponType==='melee')this.fire();
-    else this.fire();
+    this.fire();
   }
-  onMouseUp(e){if(e.button===0)this.firing=false;}
+  onMouseUp(e){
+    if(e.button===0)this.firing=false;
+    if(e.button===2){this.ads=false;this.updateHUD();}
+  }
 
   onKey(e,down){
     this.keys[e.code]=down;
     if((e.code==='ControlLeft'||e.code==='ControlRight')&&state.settings.dashMode==='toggle'&&down&&!e.repeat)this.dash=!this.dash;
-    if((e.code==='ShiftLeft'||e.code==='ShiftRight')&&down&&!e.repeat){
-      if(this.dash&&this.isMoving())this.startSlide();
-      else if(state.settings.crouchMode==='toggle')this.crouch=!this.crouch;
+    if((e.code==='ShiftLeft'||e.code==='ShiftRight')){
+      if(down&&!e.repeat){
+        if(this.dash&&this.isMoving()&&!this.isSliding()) this.startSlide();
+        else if(state.settings.crouchMode==='toggle') this.crouch=!this.crouch;
+        else if(state.settings.crouchMode==='hold'&&!this.isSliding()) this.crouch=true;
+      }else if(!down&&state.settings.crouchMode==='hold'&&!this.isSliding()){
+        this.crouch=false;
+      }
     }
-    if(e.code==='Space'&&down&&!e.repeat&&this.canJump&&!this.isSliding()){
-      this.velocity.y=8.2;this.canJump=false;
+    if(e.code==='Space'&&down&&!e.repeat&&this.canJump){
+      if(this.isSliding()){
+        this.slideJump();
+      }else if(!this.crouch){
+        this.velocity.y=9.2;this.canJump=false;
+      }
     }
     if(e.code==='Digit1'&&down&&!e.repeat){this.currentWeaponType='primary';this.finishWeaponSwitch();}
     if(e.code==='Digit2'&&down&&!e.repeat){this.currentWeaponType='secondary';this.finishWeaponSwitch();}
@@ -122,7 +143,25 @@ export class ZeroDivisionGame{
   finishWeaponSwitch(){
     this.reloading=false;this.inspecting=false;this.firing=false;this.updateWeaponModel();this.updateHUD();
   }
-  startSlide(){this.slideTimer=.68;this.crouch=false;this.dash=true;}
+  startSlide(){
+    if(this.isSliding())return;
+    const horizontal=new THREE.Vector3(this.velocity.x,0,this.velocity.z);
+    if(horizontal.lengthSq()<1){
+      const yaw=this.camera.rotation.y;
+      horizontal.set(Math.sin(yaw),0,-Math.cos(yaw));
+    }else horizontal.normalize();
+    this.slideVelocity.copy(horizontal).multiplyScalar(Math.max(7.5,Math.min(12.5,Math.hypot(this.velocity.x,this.velocity.z)+2.2)));
+    this.slideTimer=.82;
+    this.crouch=false;
+    this.dash=false;
+    this.keys.ShiftLeft=false;this.keys.ShiftRight=false;
+  }
+  slideJump(){
+    const carry=Math.min(12.5,Math.max(8.0,this.slideVelocity.length()*1.04));
+    const dir=this.slideVelocity.clone().setY(0).normalize();
+    this.velocity.x=dir.x*carry;this.velocity.z=dir.z*carry;this.velocity.y=8.6;
+    this.slideTimer=0;this.crouch=false;this.canJump=false;
+  }
   isSliding(){return this.slideTimer>0;}
   isMoving(){return !!(this.keys.KeyW||this.keys.KeyA||this.keys.KeyS||this.keys.KeyD);}
 
@@ -215,8 +254,9 @@ export class ZeroDivisionGame{
     this.addDistantSilhouette();
     this.spawnHumans(state.bots);
     this.addHands();this.addWeapon();
-    const spawns={city:[0,8],mountain:[0,4],interior:[0,8]};const s=spawns[state.map]||spawns.city;this.playerPos.set(s[0],this.groundHeightAt(s[0],s[1]),s[1]);this.velocity.set(0,0,0);this.canJump=true;
-    this.camera.rotation.order='YXZ';this.camera.rotation.set(0,0,0);this.updateCameraTransform(0);
+    const spawns={city:[0,8],mountain:[0,4],interior:[0,8]};const s=spawns[state.map]||spawns.city;this.playerPos.set(s[0],this.groundHeightAt(s[0],s[1]),s[1]);this.velocity.set(0,0,0);this.slideVelocity.set(0,0,0);this.canJump=true;
+    this.eyeY=this.playerPos.y+1.72;
+    this.camera.rotation.order='YXZ';this.camera.rotation.set(0,0,0);this.ads=false;this.updateCameraTransform(0);
     this.updateWeaponModel();
   }
 
@@ -251,7 +291,7 @@ export class ZeroDivisionGame{
     }
   }
 
-  box(x,y,z,sx,sy,sz,c=0x515a61,opts={}){const o=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),new THREE.MeshStandardMaterial({color:c,roughness:.78,metalness:.04}));o.position.set(x,y,z);o.castShadow=true;o.receiveShadow=true;o.name=opts.name||'structure';this.mapGroup.add(o);if(opts.collider!==false)this.colliders.push({minX:x-sx/2,maxX:x+sx/2,minZ:z-sz/2,maxZ:z+sz/2,type:'box'});return o}
+  box(x,y,z,sx,sy,sz,c=0x515a61,opts={}){const o=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),new THREE.MeshStandardMaterial({color:c,roughness:.78,metalness:.04}));o.position.set(x,y,z);o.castShadow=true;o.receiveShadow=true;o.name=opts.name||'structure';this.mapGroup.add(o);if(opts.collider!==false)this.colliders.push({minX:x-sx/2,maxX:x+sx/2,minZ:z-sz/2,maxZ:z+sz/2,type:'box',object:o});return o}
   tree(x,z,s=1){const y=this.groundHeightAt(x,z),g=new THREE.Group();g.position.set(x,y,z);const bark=new THREE.MeshStandardMaterial({color:0x4e3a28,roughness:1});const green=new THREE.MeshStandardMaterial({color:0x1f5a32,roughness:1});const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.18*s,.30*s,2.6*s,8),bark);trunk.position.y=1.3*s;trunk.castShadow=true;g.add(trunk);for(let i=0;i<4;i++){const crown=new THREE.Mesh(new THREE.ConeGeometry((1.2-i*.16)*s,(2.4-i*.27)*s,9),green);crown.position.y=(2.2+i*.7)*s;crown.rotation.y=i*.8;crown.castShadow=true;g.add(crown)}this.mapGroup.add(g);this.colliders.push({minX:x-.42*s,maxX:x+.42*s,minZ:z-.42*s,maxZ:z+.42*s,type:'box'});return g}
   rock(x,z,s=1,c=0x667068){const y=this.groundHeightAt(x,z);const o=new THREE.Mesh(new THREE.DodecahedronGeometry(1.1*s,1),new THREE.MeshStandardMaterial({color:c,roughness:1}));o.position.set(x,y+.8*s,z);o.scale.set(1.4,.75,1);o.rotation.set(Math.random(),Math.random()*Math.PI,Math.random());o.castShadow=true;o.receiveShadow=true;this.mapGroup.add(o);this.colliders.push({minX:x-1.25*s,maxX:x+1.25*s,minZ:z-1*s,maxZ:z+1*s,type:'box'});return o}
   stairs(x,z,w=5,steps=8,rise=.4,depth=.55,dir=0,c=0x4b5558){const g=new THREE.Group();g.position.set(x,this.groundHeightAt(x,z),z);g.rotation.y=dir;for(let i=0;i<steps;i++){const h=(i+1)*rise,o=new THREE.Mesh(new THREE.BoxGeometry(w,h,depth*(i+1)),new THREE.MeshStandardMaterial({color:c,roughness:.86}));o.position.set(0,h/2,(i*depth)/2);o.castShadow=true;o.receiveShadow=true;g.add(o)}this.mapGroup.add(g);this.colliders.push({minX:x-w/2-.1,maxX:x+w/2+.1,minZ:z-depth/2-.2,maxZ:z+steps*depth+.2,type:'box'});return g}
@@ -307,12 +347,17 @@ export class ZeroDivisionGame{
   getAimDirection(){const d=new THREE.Vector3(0,0,-1);d.applyQuaternion(this.camera.quaternion).normalize();return d}
 
   addHands(){
-    this.handGroup=new THREE.Group();const glove=new THREE.MeshStandardMaterial({color:0x1b2226,roughness:.95});const sleeve=new THREE.MeshStandardMaterial({color:0x303a3f,roughness:1});const skin=new THREE.MeshStandardMaterial({color:0x9e806e,roughness:.9});
-    const armL=new THREE.Mesh(new THREE.CylinderGeometry(.105,.14,.72,10),sleeve);armL.rotation.z=-.24;armL.position.set(-.34,-.32,-.53);this.handGroup.add(armL);
-    const armR=new THREE.Mesh(new THREE.CylinderGeometry(.105,.14,.74,10),sleeve);armR.rotation.z=.30;armR.position.set(.36,-.35,-.48);this.handGroup.add(armR);
-    const gloveL=new THREE.Mesh(new THREE.BoxGeometry(.20,.24,.30),glove);gloveL.rotation.z=-.10;gloveL.position.set(-.25,-.60,-.82);this.handGroup.add(gloveL);
-    const gloveR=new THREE.Mesh(new THREE.BoxGeometry(.20,.25,.29),glove);gloveR.rotation.z=.08;gloveR.position.set(.24,-.58,-.62);this.handGroup.add(gloveR);
-    const fingers=new THREE.Mesh(new THREE.SphereGeometry(.105,10,8),skin);fingers.visible=false;this.handGroup.add(fingers);
+    this.handGroup=new THREE.Group();
+    const sleeve=new THREE.MeshStandardMaterial({color:0x283239,roughness:.96,metalness:0});
+    const glove=new THREE.MeshStandardMaterial({color:0x11181c,roughness:.9,metalness:.02});
+    const makeArm=(x,y,z,rz,rx)=>{
+      const arm=new THREE.Mesh(new THREE.CapsuleGeometry(.115,.52,5,8),sleeve);
+      arm.position.set(x,y,z);arm.rotation.set(rx,0,rz);arm.castShadow=false;this.handGroup.add(arm);return arm;
+    };
+    makeArm(-.17,-.43,-.52,-.56,-.28);
+    makeArm(.20,-.41,-.46,.62,-.26);
+    const leftHand=new THREE.Mesh(new THREE.SphereGeometry(.12,12,10),glove);leftHand.scale.set(1.0,.82,1.15);leftHand.position.set(.03,-.58,-.86);this.handGroup.add(leftHand);
+    const rightHand=new THREE.Mesh(new THREE.SphereGeometry(.12,12,10),glove);rightHand.scale.set(1.05,.82,1.15);rightHand.position.set(.18,-.55,-.72);this.handGroup.add(rightHand);
     this.camera.add(this.handGroup);this.handGroup.visible=state.settings.hands;
   }
 
@@ -363,57 +408,138 @@ export class ZeroDivisionGame{
   startInspect(){if(!this.running||this.reloading||this.inspecting||this.currentWeaponType==='melee')return;this.inspecting=true;this.inspectTimer=1.8;this.firing=false;document.getElementById('game-ui').classList.add('hud-hidden');}
   useMedkit(){if(this.health>=100)return;this.health=Math.min(100,this.health+35);this.updateHUD();}
   getCurrentMagSize(){if(this.currentWeaponType==='melee')return 0;const data=(this.currentWeaponType==='primary'?WEAPONS.primary:WEAPONS.secondary)[this.currentWeaponType==='primary'?state.primary:state.secondary];return data?.mag||30}
-  playShotSound(kind){try{this.audioCtx??=new(window.AudioContext||window.webkitAudioContext)();if(this.audioCtx.state==='suspended')this.audioCtx.resume();const t=this.audioCtx.currentTime,o=this.audioCtx.createOscillator(),g=this.audioCtx.createGain();o.type=kind==='melee'?'triangle':'square';o.frequency.setValueAtTime(kind==='melee'?90:150,t);o.frequency.exponentialRampToValueAtTime(kind==='melee'?55:70,t+.09);g.gain.setValueAtTime(.001,t);g.gain.exponentialRampToValueAtTime(kind==='melee'?.05:.16,t+.004);g.gain.exponentialRampToValueAtTime(.001,t+.12);o.connect(g).connect(this.audioCtx.destination);o.start(t);o.stop(t+.13)}catch{}}
+  playShotSound(kind){
+    try{
+      if(kind==='melee'){
+        this.audioCtx??=new(window.AudioContext||window.webkitAudioContext)();
+        if(this.audioCtx.state==='suspended')this.audioCtx.resume();
+        const t=this.audioCtx.currentTime,o=this.audioCtx.createOscillator(),g=this.audioCtx.createGain();
+        o.type='triangle';o.frequency.setValueAtTime(90,t);o.frequency.exponentialRampToValueAtTime(55,t+.09);
+        g.gain.setValueAtTime(.001,t);g.gain.exponentialRampToValueAtTime(.05,t+.004);g.gain.exponentialRampToValueAtTime(.001,t+.12);
+        o.connect(g).connect(this.audioCtx.destination);o.start(t);o.stop(t+.13);
+        return;
+      }
+      const pitch={M4A1:1.00,AKM:.86,SMG45:1.16,P320:1.07,G18:1.30};
+      const name=this.currentWeaponType==='primary'?state.primary:state.secondary;
+      const src=this.gunAudio;
+      const shot=src.cloneNode(true);
+      shot.volume=.72;
+      shot.playbackRate=pitch[name]||1;
+      shot.preservesPitch=false;
+      shot.currentTime=0;
+      const promise=shot.play();
+      if(promise?.catch)promise.catch(()=>{});
+      setTimeout(()=>{shot.pause();shot.removeAttribute('src');shot.load()},900);
+    }catch{}
+  }
 
   update(dt){
     if(!this.running||this.paused)return;
-    this.controls.pointerSpeed=state.settings.sensitivity;
     if(state.settings.dashMode==='hold')this.dash=!!(this.keys.ControlLeft||this.keys.ControlRight);
     if(state.settings.crouchMode==='hold'&&!this.isSliding())this.crouch=!!(this.keys.ShiftLeft||this.keys.ShiftRight);
-    const moving=this.isMoving();
-    if(!moving&&this.dash)this.dash=false; // stop sprint when movement stops
-    if(this.dash&&moving&&!this.crouch&&!this.isSliding())this.stamina=Math.max(0,this.stamina-dt*23);else this.stamina=Math.min(100,this.stamina+dt*14);if(this.stamina<6)this.dash=false;
-    if(this.slideTimer>0){this.slideTimer=Math.max(0,this.slideTimer-dt);if(this.slideTimer===0)this.dash=false;this.crouch=false}
-    let speed=this.isSliding()?10.0:(this.dash?8.4:4.4);if(this.crouch)speed*=.54;
-    let f=(this.keys.KeyW?1:0)-(this.keys.KeyS?1:0),r=(this.keys.KeyD?1:0)-(this.keys.KeyA?1:0);const len=Math.hypot(f,r)||1;f/=len;r/=len;
-    const yaw=this.camera.rotation.y;const forward=new THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));const side=new THREE.Vector3(Math.cos(yaw),0,Math.sin(yaw));const wish=forward.multiplyScalar(f).add(side.multiplyScalar(r)).multiplyScalar(speed);
-    this.velocity.x=THREE.MathUtils.damp(this.velocity.x,wish.x,14,dt);this.velocity.z=THREE.MathUtils.damp(this.velocity.z,wish.z,14,dt);
-    const nx=this.playerPos.x+this.velocity.x*dt,nz=this.playerPos.z+this.velocity.z*dt;let blocked=false;for(const c of this.colliders){if(nx>c.minX-.38&&nx<c.maxX+.38&&nz>c.minZ-.38&&nz<c.maxZ+.38){blocked=true;break}}if(!blocked){this.playerPos.x=nx;this.playerPos.z=nz}
-    const ground=this.groundHeightAt(this.playerPos.x,this.playerPos.z);const stance=this.isSliding()?1.08:(this.crouch?1.08:1.72);
-    this.velocity.y-=18*dt;const targetGround=ground+stance;
-    if(this.camera.position.y+this.velocity.y*dt<=targetGround){this.camera.position.y=targetGround;this.velocity.y=0;this.canJump=true}else{this.camera.position.y+=this.velocity.y*dt;this.canJump=false}
+
+    const movingInput=this.isMoving();
+    if(!this.isSliding()&&!movingInput)this.dash=false;
+    if(this.dash&&!movingInput)this.dash=false;
+
+    if(this.isSliding()){
+      this.slideTimer=Math.max(0,this.slideTimer-dt);
+      const speed=this.slideVelocity.length();
+      const friction=9.2;
+      const newSpeed=Math.max(0,speed-friction*dt);
+      if(speed>0.001)this.slideVelocity.multiplyScalar(newSpeed/speed);
+      if(newSpeed<1.25||this.slideTimer<=0){
+        this.slideTimer=0;this.slideVelocity.set(0,0,0);this.crouch=false;
+      }
+      this.velocity.x=this.slideVelocity.x;this.velocity.z=this.slideVelocity.z;
+    }else{
+      if(this.dash&&!this.crouch)this.stamina=Math.max(0,this.stamina-dt*23);
+      else this.stamina=Math.min(100,this.stamina+dt*14);
+      if(this.stamina<6)this.dash=false;
+      const speed=this.crouch?2.35:(this.dash?8.4:4.6);
+      let f=(this.keys.KeyW?1:0)-(this.keys.KeyS?1:0),r=(this.keys.KeyD?1:0)-(this.keys.KeyA?1:0);
+      const len=Math.hypot(f,r);if(len>0){f/=len;r/=len;}
+      const yaw=this.camera.rotation.y;
+      const forward=new THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));
+      const side=new THREE.Vector3(Math.cos(yaw),0,Math.sin(yaw));
+      const wish=forward.multiplyScalar(f).add(side.multiplyScalar(r));
+      if(len>0)wish.multiplyScalar(speed);
+      const accel=len>0?(this.crouch?15:18):24;
+      this.velocity.x=THREE.MathUtils.damp(this.velocity.x,len>0?wish.x:0,accel,dt);
+      this.velocity.z=THREE.MathUtils.damp(this.velocity.z,len>0?wish.z:0,accel,dt);
+    }
+
+    const nx=this.playerPos.x+this.velocity.x*dt,nz=this.playerPos.z+this.velocity.z*dt;
+    let blocked=false;
+    for(const c of this.colliders){
+      if(nx>c.minX-.42&&nx<c.maxX+.42&&nz>c.minZ-.42&&nz<c.maxZ+.42){blocked=true;break;}
+    }
+    if(!blocked){this.playerPos.x=nx;this.playerPos.z=nz;}else if(this.isSliding()){this.slideVelocity.multiplyScalar(.5);this.velocity.x=this.slideVelocity.x;this.velocity.z=this.slideVelocity.z;}else{this.velocity.x*=.35;this.velocity.z*=.35;}
+
+    const ground=this.groundHeightAt(this.playerPos.x,this.playerPos.z);
+    const stance=this.isSliding()?1.00:(this.crouch?1.08:1.72);
+    const targetGround=ground+stance;
+    this.velocity.y-=20.5*dt;
+    let nextY=this.eyeY+this.velocity.y*dt;
+    if(nextY<=targetGround){nextY=targetGround;this.velocity.y=0;this.canJump=true;}else this.canJump=false;
+    this.eyeY=nextY;
     this.updateCameraTransform(dt);
 
-    if(this.firing && (this.currentWeaponType==='primary'||this.currentWeaponType==='secondary'))this.fire();
+    if(this.firing&&(this.currentWeaponType==='primary'||this.currentWeaponType==='secondary'))this.fire();
     if(this.fireCooldown>0)this.fireCooldown=Math.max(0,this.fireCooldown-dt);
     if(this.reloading){this.reloadTimer-=dt;if(this.reloadTimer<=0){const need=this.getCurrentMagSize()-this.magAmmo[this.currentWeaponType],take=Math.min(need,this.reserveAmmo[this.currentWeaponType]);this.magAmmo[this.currentWeaponType]+=take;this.reserveAmmo[this.currentWeaponType]-=take;this.reloading=false;}}
-    if(this.inspecting){this.inspectTimer-=dt;if(this.inspectTimer<=0){this.inspecting=false;document.getElementById('game-ui').classList.remove('hud-hidden')}}
-    this.updateWeaponAnimation(dt,moving);
+    if(this.inspecting){this.inspectTimer-=dt;if(this.inspectTimer<=0){this.inspecting=false;document.getElementById('game-ui').classList.remove('hud-hidden');}}
+    this.updateWeaponAnimation(dt,movingInput);
     this.updateEnemies(dt);
     this.updateEffects(dt);
     this.ping=Math.round(18+Math.sin(performance.now()*.0007)*5+Math.random()*5);this.packetLoss=Math.random()<.028?Number((Math.random()*.7).toFixed(1)):0;
     this.updateHUD();this.updateDebug();
   }
-
   updateCameraTransform(dt){
-    const bob=this.isMoving()?Math.sin(performance.now()*.008*(this.dash?1.7:1))*.025:0;const shake=this.dash?Math.sin(performance.now()*.035)*state.settings.shake*.010:0;const leanTarget=this.keys.KeyQ?-1:(this.keys.KeyE?1:0);this.lean=THREE.MathUtils.damp(this.lean,leanTarget,14,dt);
-    const stance=this.isSliding()?1.08:(this.crouch?1.08:1.72);const leanX=this.lean*.48;
-    this.camera.position.x=this.playerPos.x+leanX;this.camera.position.z=this.playerPos.z;this.camera.position.y=(this.camera.position.y||0); // y is integrated above
-    this.camera.position.y+=(stance+this.groundHeightAt(this.playerPos.x,this.playerPos.z)+bob+shake-this.camera.position.y)*Math.min(1,dt*14)+this.velocity.y*dt;
-    const rollTarget=-this.lean*.13;
+    const t=performance.now()*.001;
+    const moving=(Math.hypot(this.velocity.x,this.velocity.z)>0.15);
+    const walkFreq=this.dash?14:(this.crouch?9:11);
+    const bobAmp=this.isSliding()?.008:(this.crouch?.012:.022);
+    this.visualBob=moving?Math.sin(t*walkFreq)*bobAmp:THREE.MathUtils.damp(this.visualBob,0,12,dt);
+    const shakeAmp=this.dash?state.settings.shake*.018:0;
+    const shake=Math.sin(t*26)*shakeAmp;
+    const leanTarget=this.keys.KeyQ?-1:(this.keys.KeyE?1:0);
+    this.lean=THREE.MathUtils.damp(this.lean,leanTarget,14,dt);
+    const yaw=this.camera.rotation.y;
+    const right=new THREE.Vector3(Math.cos(yaw),0,Math.sin(yaw));
+    const leanAmount=this.lean*.48;
+    this.camera.position.x=this.playerPos.x+right.x*leanAmount;
+    this.camera.position.z=this.playerPos.z+right.z*leanAmount;
+    this.camera.position.y=this.eyeY+this.visualBob+shake;
+    const rollTarget=-this.lean*.15;
     this.camera.rotation.z=THREE.MathUtils.damp(this.camera.rotation.z,rollTarget,18,dt);
-    // Keep jumping physical: visual bob/shake is applied to rotation/weapon, not by pulling the camera toward the ground.
-    if(this.dash){
-      this.camera.rotation.x += Math.sin(performance.now()*.032)*state.settings.shake*.0012;
-    }
+    const targetFov=this.ads?48:78;
+    this.camera.fov=THREE.MathUtils.damp(this.camera.fov,targetFov,12,dt);
+    this.camera.updateProjectionMatrix();
   }
   updateWeaponAnimation(dt,moving){
-    if(!this.weaponGroup)return;const bob=moving?Math.sin(performance.now()*.008*(this.dash?1.7:1))*.022:0;let x=.04+this.lean*.36,y=.02+bob*.65,z=0;let rx=this.weaponKick;
-    if(this.reloading){const p=1-Math.max(0,this.reloadTimer)/((this.currentWeaponType==='primary'?WEAPONS.primary[state.primary]:WEAPONS.secondary[state.secondary]).reload);x-=Math.sin(Math.min(1,p)*Math.PI)*.10;y-=Math.sin(Math.min(1,p)*Math.PI)*.14;rx=.30+Math.sin(p*Math.PI)*.12}
-    if(this.inspecting){const p=1-Math.max(0,this.inspectTimer)/1.8;const wave=Math.sin(Math.min(1,p)*Math.PI);x+=.22*wave;y+=.10*wave;rx=.18*wave;this.weaponGroup.rotation.y=.35*wave;}
-    else this.weaponGroup.rotation.y=0;
-    this.weaponGroup.position.set(x,y,z);this.weaponGroup.rotation.x=rx;this.weaponGroup.rotation.z=-this.lean*.36;this.weaponKick=THREE.MathUtils.damp(this.weaponKick,0,18,dt);
-    if(this.handGroup){this.handGroup.visible=state.settings.hands;this.handGroup.position.x=this.lean*.48;this.handGroup.position.y=(this.isSliding()?-0.10:0)+bob*.6;this.handGroup.rotation.z=-this.lean*.18}
+    if(!this.weaponGroup)return;
+    const t=performance.now()*.001;
+    const bob=moving?Math.sin(t*(this.dash?14:10))*(this.dash?.035:.018):0;
+    const adsLerp=this.ads?1:0;
+    let x=THREE.MathUtils.lerp(.04,-.105,adsLerp)+this.lean*.30;
+    let y=THREE.MathUtils.lerp(.01,.015,adsLerp)+bob*.55;
+    let z=THREE.MathUtils.lerp(0,-.20,adsLerp);
+    let rx=this.weaponKick;
+    if(this.isSliding())y-=.12;
+    if(this.reloading){const p=1-Math.max(0,this.reloadTimer)/((this.currentWeaponType==='primary'?WEAPONS.primary[state.primary]:WEAPONS.secondary[state.secondary]).reload);const wave=Math.sin(Math.min(1,p)*Math.PI);x-=wave*.10;y-=wave*.14;rx=.28+wave*.10;}
+    if(this.inspecting){const p=1-Math.max(0,this.inspectTimer)/1.8;const wave=Math.sin(Math.min(1,p)*Math.PI);x+=.20*wave;y+=.10*wave;rx=.18*wave;this.weaponGroup.rotation.y=.32*wave;}else this.weaponGroup.rotation.y=0;
+    this.weaponGroup.position.set(x,y,z);
+    this.weaponGroup.rotation.x=rx;
+    this.weaponGroup.rotation.z=-this.lean*.30;
+    this.weaponKick=THREE.MathUtils.damp(this.weaponKick,0,18,dt);
+    if(this.handGroup){
+      this.handGroup.visible=state.settings.hands;
+      this.handGroup.position.x=this.lean*.24+(this.ads?-0.02:0);
+      this.handGroup.position.y=(this.isSliding()?-0.08:0)+bob*.3;
+      this.handGroup.position.z=this.ads?-0.08:0;
+      this.handGroup.rotation.z=-this.lean*.12;
+    }
   }
   updateEnemies(dt){
     const now=performance.now()*.00055;this.enemies.forEach((e,i)=>{if(!e.alive){e.respawn-=dt;if(e.respawn<=0){e.alive=true;e.hp=100;e.group.visible=true;e.group.position.copy(e.origin)}return}const x=e.origin.x+Math.sin(now+e.phase)*2.2,z=e.origin.z+Math.cos(now*.92+e.phase)*2.2;e.group.position.x=x;e.group.position.z=z;e.group.position.y=this.groundHeightAt(x,z);e.group.rotation.y=Math.sin(now+e.phase)*.3});
@@ -421,11 +547,11 @@ export class ZeroDivisionGame{
   updateEffects(dt){for(let i=this.bulletHoles.length-1;i>=0;i--){const h=this.bulletHoles[i];h.ttl-=dt;if(h.ttl<=0){this.scene.remove(h.mesh);h.mesh.geometry.dispose();h.mesh.material.dispose();this.bulletHoles.splice(i,1)}}}
 
   updateHUD(){
-    const stance=this.isSliding()?'スライド':(this.crouch?'しゃがみ':'立ち');document.getElementById('stance').textContent=stance;document.getElementById('drive').textContent=this.dash?'ダッシュ':this.isMoving()?'歩行':'停止';document.getElementById('hud-state').textContent=this.reloading?'リロード中':this.inspecting?'点検中':this.isSliding()?'スライド':this.dash?'高速移動':'準備完了';document.getElementById('enemy-counter').textContent=String(this.enemies.filter(e=>e.alive).length);
+    const stance=this.isSliding()?'スライド':(this.crouch?'しゃがみ':'立ち');document.getElementById('stance').textContent=stance;document.getElementById('drive').textContent=this.dash?'ダッシュ':this.isMoving()?'歩行':'停止';document.getElementById('hud-state').textContent=this.reloading?'リロード中':this.inspecting?'点検中':this.ads?'ADS':this.isSliding()?'スライド':this.dash?'高速移動':'準備完了';document.getElementById('enemy-counter').textContent=String(this.enemies.filter(e=>e.alive).length);
     const weaponName=this.currentWeaponType==='primary'?state.primary:this.currentWeaponType==='secondary'?state.secondary:state.melee;document.getElementById('weapon-hud').textContent=weaponName;document.getElementById('ammo-value').textContent=this.currentWeaponType==='melee'?'—':`${this.magAmmo[this.currentWeaponType]} / ${this.reserveAmmo[this.currentWeaponType]}`;document.getElementById('fire-mode').textContent=this.currentWeaponType==='melee'?'近接':this.currentWeaponType==='primary'?'連射':'半自動';
     const hp=document.getElementById('hp-fill');if(hp)hp.style.width=`${this.health}%`;const hv=document.getElementById('hp-value');if(hv)hv.textContent=Math.round(this.health);const sv=document.getElementById('stamina-fill');if(sv)sv.style.width=`${this.stamina}%`;const st=document.getElementById('stamina-value');if(st)st.textContent=Math.round(this.stamina);document.getElementById('ping').textContent=`${this.ping} ms`;document.getElementById('packet-loss').textContent=`${this.packetLoss.toFixed(1)} %`;
   }
-  updateDebug(){const p=this.playerPos,s=this.velocity.length();const txt=[`ZERO DIVISION // DEBUG`,`FPS: ${Math.round(this.currentFPS||0)}`,`POS: ${p.x.toFixed(2)} / ${this.camera.position.y.toFixed(2)} / ${p.z.toFixed(2)}`,`VEL: ${s.toFixed(2)} m/s`,`MAP: ${state.map}`,`ENEMIES: ${this.enemies.filter(e=>e.alive).length}/${this.enemies.length}`,`WEAPON: ${this.currentWeaponType}`,`AMMO: ${this.currentWeaponType==='melee'?'—':`${this.magAmmo[this.currentWeaponType]} / ${this.reserveAmmo[this.currentWeaponType]}`}`,`PING: ${this.ping} ms`,`PACKET LOSS: ${this.packetLoss.toFixed(1)} %`,`DRAW CALLS: ${this.renderer.info.render.calls}`,`TRIANGLES: ${this.renderer.info.render.triangles}`,`PIXEL RATIO: ${this.renderer.getPixelRatio().toFixed(2)}`,`DASH: ${this.dash}  CROUCH: ${this.crouch}  LEAN: ${this.lean.toFixed(2)}`];document.getElementById('debug-lines').textContent=txt.join('\n')}
+  updateDebug(){const p=this.playerPos,s=this.velocity.length();const txt=[`ZERO DIVISION // DEBUG`,`FPS: ${Math.round(this.currentFPS||0)}`,`POS: ${p.x.toFixed(2)} / ${this.camera.position.y.toFixed(2)} / ${p.z.toFixed(2)}`,`VEL: ${s.toFixed(2)} m/s`,`MAP: ${state.map}`,`ENEMIES: ${this.enemies.filter(e=>e.alive).length}/${this.enemies.length}`,`WEAPON: ${this.currentWeaponType}`,`AMMO: ${this.currentWeaponType==='melee'?'—':`${this.magAmmo[this.currentWeaponType]} / ${this.reserveAmmo[this.currentWeaponType]}`}`,`PING: ${this.ping} ms`,`PACKET LOSS: ${this.packetLoss.toFixed(1)} %`,`DRAW CALLS: ${this.renderer.info.render.calls}`,`TRIANGLES: ${this.renderer.info.render.triangles}`,`PIXEL RATIO: ${this.renderer.getPixelRatio().toFixed(2)}`,`DASH: ${this.dash}  CROUCH: ${this.crouch}  SLIDE: ${this.isSliding()}  ADS: ${this.ads}  LEAN: ${this.lean.toFixed(2)}`];document.getElementById('debug-lines').textContent=txt.join('\n')}
 
   render(){
     this.renderer.render(this.scene,this.camera);
