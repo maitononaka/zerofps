@@ -261,7 +261,7 @@ export class ZeroDivisionGame{
     this.addWeapon();this.addHands();this.updateWeaponModel();
     const spawns={city:[0,8],mountain:[0,4],interior:[0,8]};const s=spawns[state.map]||spawns.city;this.playerPos.set(s[0],this.groundHeightAt(s[0],s[1]),s[1]);this.velocity.set(0,0,0);this.slideVelocity.set(0,0,0);this.canJump=true;
     this.eyeY=this.playerPos.y+1.72;
-    this.camera.rotation.order='YXZ';this.camera.rotation.set(0,0,0);this.ads=false;this.updateCameraTransform(0);
+    this.camera.rotation.order='YXZ';this.camera.rotation.set(0,0,0);this.controls.yaw=0;this.controls.pitch=0;this.ads=false;this.updateCameraTransform(0);
     this.updateWeaponModel();
   }
 
@@ -358,45 +358,25 @@ export class ZeroDivisionGame{
         new Promise((resolve,reject)=>loader.load('./assets/m4a1.glb',resolve,undefined,reject)),
         fetch('./assets/m4a1_sockets.json').then(r=>r.ok?r.json():{}).catch(()=>({}))
       ]);
-
-      // The socket editor stores points in a centered local coordinate space.
-      // The downloaded GLB itself has an offset pivot, so keep it as a child
-      // and translate it by its geometric center before applying the FPS
-      // orientation. This prevents every socket (hands / optic / muzzle) from
-      // drifting away from the actual mesh.
-      const sourceRoot=gltf.scene;
-      sourceRoot.updateMatrixWorld(true);
-      const bounds=new THREE.Box3().setFromObject(sourceRoot);
-      const center=bounds.getCenter(new THREE.Vector3());
-      sourceRoot.position.copy(center).multiplyScalar(-1);
-      sourceRoot.updateMatrixWorld(true);
-
-      sourceRoot.traverse(o=>{
+      const root=gltf.scene;
+      root.traverse(o=>{
         if(o.isMesh){
           o.castShadow=false;
           o.receiveShadow=false;
-          if(o.material){
-            o.material.transparent=false;
-            o.material.depthWrite=true;
-          }
+          if(o.material){o.material.transparent=false;o.material.depthWrite=true;}
         }
       });
-
-      const root=new THREE.Group();
-      root.name='m4a1-viewmodel-root';
-      root.add(sourceRoot);
-
-      // In the source GLB the muzzle is on local -X. Rotate that axis to
-      // camera-forward -Z exactly once. Socket coordinates stay unchanged.
-      root.rotation.set(0,-Math.PI/2,0);
-      root.scale.setScalar(0.48);
+      // IMPORTANT: Do not recenter or otherwise bake a new coordinate system here.
+      // The socket editor authored positions in the source GLB coordinate system:
+      // X = barrel axis, Y = up, Z = lateral. The only view-model transform is
+      // a fixed -90deg Y rotation plus a uniform scale. Every socket is a child of
+      // this root, so the JSON positions remain exact through ADS/lean/recoil.
+      // The source model's barrel axis is +X. Map +X to camera-forward (-Z).
+      root.rotation.set(0,Math.PI/2,0);
+      root.scale.setScalar(0.82);
       root.position.set(0,0,0);
       root.updateMatrixWorld(true);
-      root.userData.zeroDivisionSourceAxes='source: X=barrel axis, Y=up, Z=lateral';
-      root.userData.socketSpace='centered-local';
-      root.userData.originalBoundsCenter=center.toArray();
-      root.userData.modelBounds=bounds.clone();
-
+      root.userData.zeroDivisionSourceAxes='X=barrel/front, Y=up, Z=lateral';
       this.weaponModel=root;
       this.weaponSocketData=sockets && sockets.sockets ? sockets : {sockets:{}};
       this.weaponModelReady=true;
@@ -418,7 +398,7 @@ export class ZeroDivisionGame{
     const makeArm=(a,b,r=.052)=>{
       const dir=new THREE.Vector3().subVectors(b,a),len=dir.length();
       if(len<0.02)return null;
-      const m=new THREE.Mesh(new THREE.CapsuleGeometry(r,Math.max(.02,len-r*2),5,7),sleeve);
+      const m=new THREE.Mesh(new THREE.CapsuleGeometry(r,Math.max(.02,len-r*2),5,6),sleeve);
       m.position.copy(a).add(b).multiplyScalar(.5);
       m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dir.normalize());
       return m;
@@ -427,9 +407,9 @@ export class ZeroDivisionGame{
       const g=new THREE.Group();
       g.position.copy(p);
       g.rotation.set(0,side==='right'?-.15:.12,side==='right'?.08:-.08);
-      const palm=new THREE.Mesh(new THREE.SphereGeometry(.075,9,7),glove);
+      const palm=new THREE.Mesh(new THREE.SphereGeometry(.062,8,6),glove);
       palm.scale.set(1.0,.72,1.15);g.add(palm);
-      const thumb=new THREE.Mesh(new THREE.CapsuleGeometry(.021,.075,4,6),glove);
+      const thumb=new THREE.Mesh(new THREE.CapsuleGeometry(.018,.065,4,6),glove);
       thumb.position.set(side==='right'?.055:-.055,-.005,-.012);
       thumb.rotation.z=side==='right'?-.75:.75;g.add(thumb);
       return g;
@@ -487,8 +467,10 @@ export class ZeroDivisionGame{
     if(this.weaponModelReady&&this.weaponModel&&this.currentWeaponType==='primary'&&state.primary==='M4A1'){
       if(this.weaponModel.parent!==this.weaponGroup)this.weaponGroup.add(this.weaponModel);
       this.weaponModel.visible=true;
-      // Transform is established once during preload; never overwrite the
-      // socket-editor coordinate frame here.
+      this.weaponModel.position.set(0,0,0);
+      // Preserve the socket editor coordinate system. The GLB is already normalized once in preloadM4A1().
+      this.weaponModel.rotation.set(0,Math.PI/2,0);
+      this.weaponModel.scale.setScalar(.82);
       this.weaponModel.updateMatrixWorld(true);
       this.attachHandsToWeaponModel();
       this.rebuildSocketDrivenAttachments();
@@ -523,11 +505,7 @@ export class ZeroDivisionGame{
       obj.userData.zdAttachment=true;
       obj.position.set(...s.position);
       if(Array.isArray(s.rotation)&&s.rotation.length===3)obj.rotation.set(s.rotation[0],s.rotation[1],s.rotation[2]);
-      // Socket scale is marker metadata from the editor, not the runtime
-      // attachment scale. Runtime attachments keep their own authored size.
-      // Muzzle/stock helpers are authored along local Z; rotate them onto the
-      // model's X barrel axis after applying the socket rotation.
-      if(name==='muzzle'||name==='stock')obj.rotation.y+=Math.PI/2;
+      // Socket scale is an editor marker size, not an attachment model scale.
       model.add(obj);return obj;
     };
     if(state.sight && state.sight!=='なし'){
@@ -541,7 +519,7 @@ export class ZeroDivisionGame{
       new THREE.MeshBasicMaterial({color:0xffe7a0,transparent:true,opacity:0,depthWrite:false})
     );
     const muzzleSocket=sockets.muzzle?.position||[-1.0693809577,.1620683046,.0122797674];
-    this.muzzleFlash.position.set(muzzleSocket[0]-.07,muzzleSocket[1],muzzleSocket[2]);
+    this.muzzleFlash.position.set(muzzleSocket[0],muzzleSocket[1],muzzleSocket[2]);
     this.muzzleFlash.userData.zdAttachment=true;
     model.add(this.muzzleFlash);
   }
@@ -668,9 +646,7 @@ export class ZeroDivisionGame{
 
   update(dt){
     if(!this.running||this.paused)return;
-    // SimplePointerLock owns the real mouse-look state. Keep the game state
-    // synchronized every frame so movement, lean, compass and camera all use
-    // the exact same horizontal heading.
+    // Keep gameplay orientation synchronized with the actual pointer-lock camera.
     this.yaw=this.controls.yaw;
     this.pitch=this.controls.pitch;
     if(state.settings.dashMode==='hold')this.dash=!!(this.keys.ControlLeft||this.keys.ControlRight);
@@ -765,15 +741,17 @@ export class ZeroDivisionGame{
     const adsLerp=this.ads?1:0;
     // Weapon view positions are camera-local. ADS is computed from the actual
     // optic socket, not a hard-coded point, so a future socket edit updates ADS automatically.
-    const normal=new THREE.Vector3(.20,-.28,-1.02);
+    // View-model is intentionally larger than the old versions and sits low/right in the normal stance.
+    // ADS moves the rifle toward the eye by making the rear-sight anchor land on the screen center.
+    const normal=new THREE.Vector3(.24,-.82,-1.06);
     let target=normal.clone();
-    const opticLocal=this.getSocketInWeaponView('optic');
-    if(opticLocal){
-      const desiredOptic=new THREE.Vector3(0,-.02,-.54);
-      const adsTarget=desiredOptic.clone().sub(opticLocal);
+    const rearSightLocal=this.getSocketInWeaponView('optic');
+    if(rearSightLocal){
+      const desiredRearSight=new THREE.Vector3(0,-.015,-.56);
+      const adsTarget=desiredRearSight.clone().sub(rearSightLocal);
       target.lerp(adsTarget,adsLerp);
     }else{
-      target.lerp(new THREE.Vector3(0,-.04,-.68),adsLerp);
+      target.lerp(new THREE.Vector3(0,-.12,-.42),adsLerp);
     }
     target.x+=this.lean*.035;
     target.y+=bob*.45;
@@ -807,6 +785,8 @@ export class ZeroDivisionGame{
 
   updateHUD(){
     const stance=this.isSliding()?'スライド':(this.crouch?'しゃがみ':'立ち');document.getElementById('stance').textContent=stance;document.getElementById('drive').textContent=this.dash?'ダッシュ':this.isMoving()?'歩行':'停止';document.getElementById('hud-state').textContent=this.reloading?'リロード中':this.inspecting?'点検中':this.ads?'ADS':this.isSliding()?'スライド':this.dash?'高速移動':'準備完了';document.getElementById('enemy-counter').textContent=String(this.enemies.filter(e=>e.alive).length);
+    const crosshair=document.getElementById('crosshair');
+    if(crosshair)crosshair.classList.toggle('hidden',this.ads||this.reloading||this.inspecting);
     const weaponName=this.currentWeaponType==='primary'?state.primary:this.currentWeaponType==='secondary'?state.secondary:state.melee;document.getElementById('weapon-hud').textContent=weaponName;document.getElementById('ammo-value').textContent=this.currentWeaponType==='melee'?'—':`${this.magAmmo[this.currentWeaponType]} / ${this.reserveAmmo[this.currentWeaponType]}`;document.getElementById('fire-mode').textContent=this.currentWeaponType==='melee'?'近接':this.currentWeaponType==='primary'?'連射':'半自動';
     const hp=document.getElementById('hp-fill');if(hp)hp.style.width=`${this.health}%`;const hv=document.getElementById('hp-value');if(hv)hv.textContent=Math.round(this.health);const sv=document.getElementById('stamina-fill');if(sv)sv.style.width=`${this.stamina}%`;const st=document.getElementById('stamina-value');if(st)st.textContent=Math.round(this.stamina);document.getElementById('ping').textContent=`${this.ping} ms`;document.getElementById('packet-loss').textContent=`${this.packetLoss.toFixed(1)} %`;this.updateCompass();
   }
@@ -814,9 +794,7 @@ export class ZeroDivisionGame{
     const wrap=document.getElementById('compass');if(!wrap)return;
     wrap.classList.toggle('hidden',!state.settings.compass);
     if(!state.settings.compass)return;
-    // Three.js camera yaw is positive toward -X (west). Convert it to a
-    // conventional compass bearing where +X=east and -Z=north.
-    const deg=(((-this.yaw*180/Math.PI)%360)+360)%360;
+    const deg=(this.yaw*180/Math.PI%360+360)%360;
     const headingEl=document.getElementById('compass-heading');if(headingEl)headingEl.textContent=String(Math.round(deg)).padStart(3,'0')+'°';
     const strip=document.getElementById('compass-strip');if(!strip)return;
     const labels=['N','NE','E','SE','S','SW','W','NW'];

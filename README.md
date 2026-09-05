@@ -1,12 +1,21 @@
-# Zero Division V12
+# ZERO DIVISION V14
 
-V12 fixes the FPS view-model transform and movement-axis desynchronization.
+Three.js FPS prototype update.
 
-Key changes:
-- M4A1 is rendered from the authored GLB socket coordinate system.
-- Hands are siblings of the weapon model and are positioned from the JSON sockets after the model transform.
-- Optic/muzzle/stock sockets are transformed into the weapon-view coordinate space instead of being placed in source-model space.
-- Weapon view is anchored to the right-hand socket; ADS is anchored to the optic socket.
-- Horizontal movement reads the live Pointer Lock yaw every frame, so W/A/S/D follows the current view rather than the initial spawn direction.
-- Sliding uses the live view yaw when starting.
-- Compass follows the same yaw source.
+## Changes
+- Larger first-person M4A1 view model.
+- Correct GLB barrel-axis conversion: source +X -> camera-forward -Z.
+- JSON socket positions remain in source-model coordinates.
+- Default attachments remain hidden unless selected.
+- ADS uses the `optic` socket as the rear/iron-sight anchor and moves the view model toward the eye so the anchor is centered.
+- Crosshair hides while ADS, reloading, or inspecting.
+- Gameplay yaw is synchronized from the actual pointer-lock camera every frame, so WASD follows the current view direction instead of the initial heading.
+- Socket attachment rotation/scale no longer gets an incorrect extra transform.
+- Muzzle flash is placed directly on the JSON `muzzle` socket.
+- Hands stay socket-driven and are kept visually smaller.
+
+Run with VS Code Live Server or:
+
+```bash
+python -m http.server 8000
+```
