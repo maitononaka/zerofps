@@ -5,6 +5,9 @@ const V3 = new THREE.Vector3();
 const V3B = new THREE.Vector3();
 const UP = new THREE.Vector3(0,1,0);
 const TMP_M = new THREE.Matrix4();
+const MOVE_FORWARD = new THREE.Vector3();
+const MOVE_RIGHT = new THREE.Vector3();
+const CAMERA_ROT = new THREE.Quaternion();
 
 const WEAPONS = {
   primary: {
@@ -143,12 +146,24 @@ export class ZeroDivisionGame{
   finishWeaponSwitch(){
     this.reloading=false;this.inspecting=false;this.firing=false;this.updateWeaponModel();this.updateHUD();
   }
+  getMoveBasis(){
+    this.camera.getWorldQuaternion(CAMERA_ROT);
+    MOVE_FORWARD.set(0,0,-1).applyQuaternion(CAMERA_ROT);
+    MOVE_FORWARD.y=0;
+    if(MOVE_FORWARD.lengthSq()<1e-8) MOVE_FORWARD.set(0,0,-1);
+    else MOVE_FORWARD.normalize();
+    MOVE_RIGHT.set(1,0,0).applyQuaternion(CAMERA_ROT);
+    MOVE_RIGHT.y=0;
+    if(MOVE_RIGHT.lengthSq()<1e-8) MOVE_RIGHT.set(1,0,0);
+    else MOVE_RIGHT.normalize();
+    return {forward:MOVE_FORWARD,right:MOVE_RIGHT};
+  }
   startSlide(){
     if(this.isSliding())return;
     const horizontal=new THREE.Vector3(this.velocity.x,0,this.velocity.z);
     if(horizontal.lengthSq()<1){
-      const yaw=this.camera.rotation.y;
-      horizontal.set(Math.sin(yaw),0,-Math.cos(yaw));
+      const basis=this.getMoveBasis();
+      horizontal.copy(basis.forward);
     }else horizontal.normalize();
     this.slideVelocity.copy(horizontal).multiplyScalar(Math.max(7.5,Math.min(12.5,Math.hypot(this.velocity.x,this.velocity.z)+2.2)));
     this.slideTimer=.82;
@@ -459,10 +474,8 @@ export class ZeroDivisionGame{
       const speed=this.crouch?2.35:(this.dash?8.4:4.6);
       let f=(this.keys.KeyW?1:0)-(this.keys.KeyS?1:0),r=(this.keys.KeyD?1:0)-(this.keys.KeyA?1:0);
       const len=Math.hypot(f,r);if(len>0){f/=len;r/=len;}
-      const yaw=this.camera.rotation.y;
-      const forward=new THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));
-      const side=new THREE.Vector3(Math.cos(yaw),0,Math.sin(yaw));
-      const wish=forward.multiplyScalar(f).add(side.multiplyScalar(r));
+      const basis=this.getMoveBasis();
+      const wish=basis.forward.clone().multiplyScalar(f).add(basis.right.clone().multiplyScalar(r));
       if(len>0)wish.multiplyScalar(speed);
       const accel=len>0?(this.crouch?15:18):24;
       this.velocity.x=THREE.MathUtils.damp(this.velocity.x,len>0?wish.x:0,accel,dt);
