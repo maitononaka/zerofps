@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "model": "m4a1.glb",
+  "coordinateSystem": "normalized-viewmodel",
+  "sockets": {
+    "grip":   { "position": [ 0.16, -0.58, -0.60 ], "rotation": [0,0,0] },
+    "optic":  { "position": [ 0.02, -0.08, -0.98 ], "rotation": [0,0,0] },
+    "muzzle": { "position": [ 0.02, -0.33, -2.45 ], "rotation": [0,0,0] },
+    "stock":  { "position": [ 0.02, -0.39, -0.18 ], "rotation": [0,0,0] },
+    "handguard": { "position": [ 0.02, -0.32, -1.55 ], "rotation": [0,0,0] }
+  }
+}

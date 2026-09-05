@@ -1,22 +1,16 @@
-# ZERO DIVISION v0.9.4
+# ZERO DIVISION v0.8
 
-- Menu UI is fully self-contained in `index.html`.
-- The menu no longer depends on `main.js` or `ui.js` loading successfully.
-- Three.js/game code is loaded only after pressing Deploy.
-- `game.js` reads the shared state from `window.ZERO_DIVISION_STATE`.
-- Favicon request is replaced with an inline data icon to avoid favicon 404 noise.
+Three.js FPS prototype with the imported M4A1 GLB view-model.
 
-Run with Live Server or:
+## Run
 
-```bash
-python -m http.server 8000
-```
+Use a local static server (Live Server or `python -m http.server 8000`) and open the folder root.
 
-Then open `http://127.0.0.1:8000/`.
+## M4A1 model
 
+`assets/m4a1.glb` is the supplied model. It is normalized on load and used as the primary view-model.
+`assets/m4a1_sockets.json` provides normalized attachment socket positions for future editor tooling.
 
-## v0.7 audio update
-- Added `assets/m4a1.ogg` as the primary firearm firing sound.
-- Other firearm types reuse the same sample with different playback rates: M4A1 1.00x, AKM 0.86x, SMG45 1.16x, P320 1.07x, G18 1.30x.
-- Melee keeps the synthetic impact tone.
-- Audio is triggered only by in-game user interaction and gracefully ignores blocked playback.
+## Controls
+
+WASD move, mouse look, CTRL dash, SHIFT crouch/slide, SPACE jump/slide-jump, Q/E lean, RMB ADS, R reload, H inspect, 1/2/3 weapon slots, 4 medkit, 0 debug.
