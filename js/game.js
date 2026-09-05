@@ -146,8 +146,10 @@ export class ZeroDivisionGame{
     if(this.isSliding())return;
     const horizontal=new THREE.Vector3(this.velocity.x,0,this.velocity.z);
     if(horizontal.lengthSq()<1){
-      const yaw=this.controls.yaw;
-      horizontal.set(Math.sin(yaw),0,-Math.cos(yaw));
+      horizontal.copy(this.camera.getWorldDirection(new THREE.Vector3()));
+      horizontal.y=0;
+      if(horizontal.lengthSq()<1e-8) horizontal.set(0,0,-1);
+      horizontal.normalize();
     }else horizontal.normalize();
     this.slideVelocity.copy(horizontal).multiplyScalar(Math.max(7.5,Math.min(12.5,Math.hypot(this.velocity.x,this.velocity.z)+2.2)));
     this.slideTimer=.82;
@@ -363,7 +365,7 @@ export class ZeroDivisionGame{
       const maxLen=Math.max(size.x,size.y,size.z);
       const scale=1.55/Math.max(maxLen,0.001);
       root.position.sub(center);
-      root.rotation.y=Math.PI/2;
+      root.rotation.y=-Math.PI/2;
       root.scale.setScalar(scale);
       root.position.set(0,0,0);
       this.weaponModel=root;
@@ -395,9 +397,11 @@ export class ZeroDivisionGame{
       g.scale.setScalar(scale);return g;
     };
     // Hands are authored in the weapon's local space so they stay attached through ADS/lean/recoil.
+    // First-person grip pose in weapon-local coordinates.  The right hand sits at the pistol grip
+    // and the left hand reaches the handguard, so both stay attached when ADS/lean/recoil moves the weapon.
     this.handPoints={
-      right:{hand:new THREE.Vector3(.14,-.30,.22),elbow:new THREE.Vector3(.18,-.20,.52),shoulder:new THREE.Vector3(.18,-.10,.72)},
-      left:{hand:new THREE.Vector3(-.02,-.19,-.34),elbow:new THREE.Vector3(-.10,-.10,-.02),shoulder:new THREE.Vector3(-.17,-.08,.45)}
+      right:{hand:new THREE.Vector3(.13,-.235,.20),elbow:new THREE.Vector3(.23,-.13,.43),shoulder:new THREE.Vector3(.34,-.05,.66)},
+      left:{hand:new THREE.Vector3(-.11,-.19,-.36),elbow:new THREE.Vector3(-.24,-.11,-.06),shoulder:new THREE.Vector3(-.36,-.02,.48)}
     };
     for(const side of ['left','right']){
       const p=this.handPoints[side];
@@ -433,8 +437,7 @@ export class ZeroDivisionGame{
     if(this.weaponModelReady&&this.weaponModel&&this.currentWeaponType==='primary'&&state.primary==='M4A1'){
       if(this.weaponModel.parent!==this.weaponGroup)this.weaponGroup.add(this.weaponModel);
       this.weaponModel.visible=true;
-      this.weaponModel.rotation.set(0,0,0);
-      this.weaponModel.position.set(0,-.11,-1.05);
+      this.weaponModel.position.set(0,0,0);
       if(!this.weaponModel.userData.baseScale)this.weaponModel.userData.baseScale=this.weaponModel.scale.x;
       this.weaponModel.scale.setScalar(this.weaponModel.userData.baseScale);
 
@@ -598,9 +601,12 @@ export class ZeroDivisionGame{
       const speed=this.crouch?2.35:(this.dash?8.4:4.6);
       let f=(this.keys.KeyW?1:0)-(this.keys.KeyS?1:0),r=(this.keys.KeyD?1:0)-(this.keys.KeyA?1:0);
       const len=Math.hypot(f,r);if(len>0){f/=len;r/=len;}
-      const yaw=this.controls.yaw;
-      const forward=new THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));
-      const side=new THREE.Vector3(Math.cos(yaw),0,Math.sin(yaw));
+      // Derive movement directly from the camera's world-space forward/right axes.
+      // This removes the old yaw-sign mismatch that caused W/A/S/D to reverse at some headings.
+      const forward=this.camera.getWorldDirection(new THREE.Vector3());
+      forward.y=0;
+      if(forward.lengthSq()<1e-8) forward.set(0,0,-1); else forward.normalize();
+      const side=new THREE.Vector3().crossVectors(forward,UP).normalize();
       const wish=forward.multiplyScalar(f).add(side.multiplyScalar(r));
       if(len>0)wish.multiplyScalar(speed);
       const accel=len>0?(this.crouch?15:18):24;
@@ -644,8 +650,10 @@ export class ZeroDivisionGame{
     const shake=Math.sin(t*26)*shakeAmp;
     const leanTarget=this.keys.KeyQ?-1:(this.keys.KeyE?1:0);
     this.lean=THREE.MathUtils.damp(this.lean,leanTarget,14,dt);
-    const yaw=this.controls.yaw;
-    const right=new THREE.Vector3(Math.cos(yaw),0,Math.sin(yaw));
+    const forward=this.camera.getWorldDirection(new THREE.Vector3());
+    forward.y=0;
+    if(forward.lengthSq()<1e-8) forward.set(0,0,-1); else forward.normalize();
+    const right=new THREE.Vector3().crossVectors(forward,UP).normalize();
     const leanAmount=this.lean*.48;
     this.camera.position.x=this.playerPos.x+right.x*leanAmount;
     this.camera.position.z=this.playerPos.z+right.z*leanAmount;
@@ -661,15 +669,17 @@ export class ZeroDivisionGame{
     const t=performance.now()*.001;
     const bob=moving?Math.sin(t*(this.dash?14:10))*(this.dash?.035:.018):0;
     const adsLerp=this.ads?1:0;
-    let x=THREE.MathUtils.lerp(.04,-.055,adsLerp)+this.lean*.30;
-    let y=THREE.MathUtils.lerp(.01,.035,adsLerp)+bob*.55;
-    let z=THREE.MathUtils.lerp(0,-.12,adsLerp);
+    // View-model pose: normal carry on the lower-right; ADS slides the optic onto the centerline.
+    let x=THREE.MathUtils.lerp(.18,0.00,adsLerp)+this.lean*.14;
+    let y=THREE.MathUtils.lerp(-.15,-.145,adsLerp)+bob*.55;
+    let z=THREE.MathUtils.lerp(-1.00,-.57,adsLerp);
     let rx=this.weaponKick;
     if(this.isSliding())y-=.12;
     if(this.reloading){const p=1-Math.max(0,this.reloadTimer)/((this.currentWeaponType==='primary'?WEAPONS.primary[state.primary]:WEAPONS.secondary[state.secondary]).reload);const wave=Math.sin(Math.min(1,p)*Math.PI);x-=wave*.10;y-=wave*.14;rx=.28+wave*.10;}
     if(this.inspecting){const p=1-Math.max(0,this.inspectTimer)/1.8;const wave=Math.sin(Math.min(1,p)*Math.PI);x+=.20*wave;y+=.10*wave;rx=.18*wave;this.weaponGroup.rotation.y=.32*wave;}else this.weaponGroup.rotation.y=0;
     this.weaponGroup.position.set(x,y,z);
     this.weaponGroup.rotation.x=rx;
+    this.weaponGroup.rotation.y=THREE.MathUtils.lerp(0,-.015,adsLerp);
     this.weaponGroup.rotation.z=-this.lean*.30;
     this.weaponKick=THREE.MathUtils.damp(this.weaponKick,0,18,dt);
     if(this.handGroup){
@@ -677,6 +687,7 @@ export class ZeroDivisionGame{
       this.handGroup.rotation.z=0;
       this.handGroup.rotation.x=0;
       this.handGroup.position.set(0,0,0);
+      this.handGroup.scale.setScalar(.92);
     }
   }
   updateEnemies(dt){
@@ -704,7 +715,7 @@ export class ZeroDivisionGame{
 
 class SimplePointerLock extends EventTarget{
   constructor(camera,domElement){super();this.camera=camera;this.domElement=domElement;this.isLocked=false;this.pointerSpeed=1;this.yaw=0;this.pitch=0;this._onMove=e=>this._move(e);this._onChange=()=>{const locked=document.pointerLockElement===this.domElement;if(locked!==this.isLocked){this.isLocked=locked;this.dispatchEvent(new Event(locked?'lock':'unlock'));}};document.addEventListener('pointerlockchange',this._onChange)}
-  lock(){this.yaw=this.camera.rotation.y;this.pitch=this.camera.rotation.x;this.camera.rotation.order='YXZ';this.domElement.requestPointerLock?.();if(!this._listening){document.addEventListener('mousemove',this._onMove,false);this._listening=true}}
+  lock(){this.camera.rotation.order='YXZ';this.yaw=this.camera.rotation.y;this.pitch=this.camera.rotation.x;this.camera.rotation.z=0;this.domElement.requestPointerLock?.();if(!this._listening){document.addEventListener('mousemove',this._onMove,false);this._listening=true}}
   unlock(){document.exitPointerLock?.();if(this._listening){document.removeEventListener('mousemove',this._onMove,false);this._listening=false}this.isLocked=false}
   _move(e){if(!this.isLocked)return;const k=.0022*this.pointerSpeed;this.yaw-=e.movementX*k;this.pitch-=e.movementY*k;const lim=Math.PI/2-.08;this.pitch=Math.max(-lim,Math.min(lim,this.pitch));this.camera.rotation.order='YXZ';this.camera.rotation.y=this.yaw;this.camera.rotation.x=this.pitch}
 }
