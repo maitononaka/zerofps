@@ -371,9 +371,9 @@ export class ZeroDivisionGame{
       // X = barrel axis, Y = up, Z = lateral. The only view-model transform is
       // a fixed -90deg Y rotation plus a uniform scale. Every socket is a child of
       // this root, so the JSON positions remain exact through ADS/lean/recoil.
-      // The source model's barrel axis is +X. Map +X to camera-forward (-Z).
-      root.rotation.set(0,Math.PI/2,0);
-      root.scale.setScalar(0.82);
+      // The source model's barrel axis is -X. Map -X to camera-forward (-Z).
+      root.rotation.set(0,-Math.PI/2,0);
+      root.scale.setScalar(1.16);
       root.position.set(0,0,0);
       root.updateMatrixWorld(true);
       root.userData.zeroDivisionSourceAxes='X=barrel/front, Y=up, Z=lateral';
@@ -730,7 +730,7 @@ export class ZeroDivisionGame{
     this.camera.position.y=this.eyeY+this.visualBob+shake;
     const rollTarget=-this.lean*.15;
     this.camera.rotation.z=THREE.MathUtils.damp(this.camera.rotation.z,rollTarget,18,dt);
-    const targetFov=this.ads?48:78;
+    const targetFov=this.ads?46:78;
     this.camera.fov=THREE.MathUtils.damp(this.camera.fov,targetFov,12,dt);
     this.camera.updateProjectionMatrix();
   }
@@ -743,15 +743,17 @@ export class ZeroDivisionGame{
     // optic socket, not a hard-coded point, so a future socket edit updates ADS automatically.
     // View-model is intentionally larger than the old versions and sits low/right in the normal stance.
     // ADS moves the rifle toward the eye by making the rear-sight anchor land on the screen center.
-    const normal=new THREE.Vector3(.24,-.82,-1.06);
+    const normal=new THREE.Vector3(.34,-.62,-1.02);
     let target=normal.clone();
-    const rearSightLocal=this.getSocketInWeaponView('optic');
+    let rearSightLocal=null;
+    if(state.sight && state.sight!=='なし') rearSightLocal=this.getSocketInWeaponView('optic');
+    if(!rearSightLocal) rearSightLocal=this.getSocketInWeaponView('iron_rear');
     if(rearSightLocal){
-      const desiredRearSight=new THREE.Vector3(0,-.015,-.56);
+      const desiredRearSight=new THREE.Vector3(0,0.015,-0.34);
       const adsTarget=desiredRearSight.clone().sub(rearSightLocal);
       target.lerp(adsTarget,adsLerp);
     }else{
-      target.lerp(new THREE.Vector3(0,-.12,-.42),adsLerp);
+      target.lerp(new THREE.Vector3(0,-.08,-.38),adsLerp);
     }
     target.x+=this.lean*.035;
     target.y+=bob*.45;
