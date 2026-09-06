@@ -9,13 +9,13 @@ const TMP_M = new THREE.Matrix4();
 
 const WEAPONS = {
   primary: {
-    'M4A1': {mag:30, rate:.105, damage:34, reload:1.35, color:0x171b1c},
-    'AKM': {mag:30, rate:.13, damage:40, reload:1.55, color:0x241e18},
-    'SMG45': {mag:32, rate:.085, damage:27, reload:1.15, color:0x1a2023}
+    'M4A1': {mag:30, rate:.105, damage:34, reload:1.35, color:0x171b1c, recoil:{kick:.010, horizontal:.0035, spread:.0035, recovery:15, bloom:.00065}},
+    'AKM': {mag:30, rate:.13, damage:40, reload:1.55, color:0x241e18, recoil:{kick:.016, horizontal:.0065, spread:.006, recovery:11, bloom:.0011}},
+    'SMG45': {mag:32, rate:.085, damage:27, reload:1.15, color:0x1a2023, recoil:{kick:.0075, horizontal:.0045, spread:.007, recovery:18, bloom:.0008}}
   },
   secondary: {
-    'P320': {mag:17, rate:.19, damage:30, reload:1.1, color:0x202527},
-    'G18': {mag:20, rate:.105, damage:24, reload:1.25, color:0x202427}
+    'P320': {mag:17, rate:.19, damage:30, reload:1.1, color:0x202527, recoil:{kick:.018, horizontal:.005, spread:.0045, recovery:13, bloom:.0006}},
+    'G18': {mag:20, rate:.105, damage:24, reload:1.25, color:0x202427, recoil:{kick:.011, horizontal:.006, spread:.007, recovery:15, bloom:.001}}
   },
   melee: {'タクティカルナイフ':{}, 'バタフライナイフ':{}, '拳':{}}
 };
@@ -52,11 +52,11 @@ export class ZeroDivisionGame{
     this.dash=false;this.crouch=false;this.slideTimer=0;this.slideVelocity=new THREE.Vector3();this.lean=0;this.ads=false;this.eyeY=1.72;this.visualBob=0;
     this.running=false;this.paused=false;this.debug=false;
     this.health=100;this.stamina=100;
-    this.firing=false;this.fireCooldown=0;this.weaponKick=0;
+    this.firing=false;this.fireCooldown=0;this.weaponKick=0;this.recoilBloom=0;
     this.currentWeaponType='primary';
     this.magAmmo={primary:30,secondary:17,melee:0};
     this.reserveAmmo={primary:120,secondary:68,melee:0};
-    this.reloading=false;this.reloadTimer=0;this.inspectTimer=0;this.inspecting=false;
+    this.reloading=false;this.reloadTimer=0;this.reloadDuration=0;this.inspectTimer=0;this.inspecting=false;
     this.enemies=[];this.colliders=[];this.breakableGlass=[];this.bulletHoles=[];
     this.mapGroup=null;this.handGroup=null;this.weaponGroup=null;this.weaponSight=null;this.muzzleFlash=null;this.weaponModel=null;this.weaponModelReady=false;this.weaponLoadPromise=null;this.weaponSocketData=null;this.weaponConfig=null;this.weaponCameraNormal=null;this.weaponCameraAds=null;this.weaponNormalPose=null;this.weaponAdsPose=null;this._targetViewFov=45; this._adsBlend=0;
     this.lastFrameTime=performance.now();this.currentFPS=60;
@@ -148,7 +148,7 @@ export class ZeroDivisionGame{
   }
 
   finishWeaponSwitch(){
-    this.reloading=false;this.inspecting=false;this.firing=false;this.updateWeaponModel();this.updateHUD();
+    this.reloading=false;this.inspecting=false;this.firing=false;this.recoilBloom=0;this.controls.clearRecoil();this.updateWeaponModel();this.updateHUD();
   }
   startSlide(){
     if(this.isSliding())return;
@@ -266,7 +266,7 @@ export class ZeroDivisionGame{
     this.addWeapon();this.addHands();this.updateWeaponModel();
     const spawns={city:[0,8],mountain:[0,4],interior:[0,8]};const s=spawns[state.map]||spawns.city;this.playerPos.set(s[0],this.groundHeightAt(s[0],s[1]),s[1]);this.velocity.set(0,0,0);this.slideVelocity.set(0,0,0);this.canJump=true;
     this.eyeY=this.playerPos.y+1.72;
-    this.camera.rotation.order='YXZ';this.camera.rotation.set(0,0,0);this.ads=false;this.updateCameraTransform(0);
+    this.camera.rotation.order='YXZ';this.camera.rotation.set(0,0,0);this.controls.resetView();this.recoilBloom=0;this.ads=false;this.updateCameraTransform(0);
     this.updateWeaponModel();
   }
 
@@ -355,6 +355,29 @@ export class ZeroDivisionGame{
   }
 
   getAimDirection(){const d=new THREE.Vector3(0,0,-1);d.applyQuaternion(this.camera.quaternion).normalize();return d}
+  getShotDirection(data){
+    const recoil=data.recoil||{};
+    const moving=Math.hypot(this.velocity.x,this.velocity.z)>.15;
+    const airborne=!this.canJump;
+    const spread=(recoil.spread||0)+(this.recoilBloom||0);
+    const multiplier=(this.ads?.38:1)*(moving?1.65:1)*(airborne?1.8:1);
+    const radius=Math.sqrt(Math.random())*spread*multiplier;
+    if(radius<=0)return this.getAimDirection();
+    const angle=Math.random()*Math.PI*2;
+    const direction=this.getAimDirection();
+    const right=new THREE.Vector3(1,0,0).applyQuaternion(this.camera.quaternion);
+    const up=new THREE.Vector3(0,1,0).applyQuaternion(this.camera.quaternion);
+    return direction.addScaledVector(right,Math.cos(angle)*radius).addScaledVector(up,Math.sin(angle)*radius).normalize();
+  }
+  applyShotRecoil(data){
+    const recoil=data.recoil||{};
+    const adsMultiplier=this.ads?.62:1;
+    const movingMultiplier=Math.hypot(this.velocity.x,this.velocity.z)>.15?1.18:1;
+    const kick=(recoil.kick||.01)*adsMultiplier*movingMultiplier;
+    const horizontal=(Math.random()*2-1)*(recoil.horizontal||.004)*adsMultiplier;
+    this.controls.addRecoil(kick,horizontal);
+    this.recoilBloom=Math.min(.016,this.recoilBloom+(recoil.bloom||.0007));
+  }
 
   async preloadM4A1(){
     try{
@@ -665,7 +688,7 @@ export class ZeroDivisionGame{
     const name=this.currentWeaponType==='primary'?state.primary:state.secondary,data=(this.currentWeaponType==='primary'?WEAPONS.primary:WEAPONS.secondary)[name];
     this.fireCooldown=data.rate;this.magAmmo[this.currentWeaponType]--;this.weaponKick=.065;this.playShotSound('shot');
     if(this.muzzleFlash){this.muzzleFlash.material.opacity=.96;this.muzzleFlash.scale.setScalar(1.6);setTimeout(()=>{if(this.muzzleFlash){this.muzzleFlash.material.opacity=0;this.muzzleFlash.scale.setScalar(1)}},45)}
-    const origin=this.camera.position.clone();const dir=this.getAimDirection();const tracerEnd=origin.clone().addScaledVector(dir,75);const ray=new THREE.Raycaster(origin,dir,.1,75);
+    const origin=this.camera.position.clone();const dir=this.getShotDirection(data);this.applyShotRecoil(data);const tracerEnd=origin.clone().addScaledVector(dir,75);const ray=new THREE.Raycaster(origin,dir,.1,75);
     const targets=[];this.mapGroup.traverse(o=>{if(o.isMesh&&o.userData.enemyId!==undefined&&o.parent?.visible!==false)targets.push(o)});const hits=ray.intersectObjects(targets,false);let hitPoint=tracerEnd;let hitNormal=null;
     if(hits.length){hitPoint=hits[0].point;hitNormal=hits[0].face?.normal||null;const enemy=this.enemies[hits[0].object.userData.enemyId];if(enemy&&enemy.alive){const dmg=hits[0].object.userData.hitPart==='head'?Math.max(70,data.damage+25):data.damage;enemy.hp=Math.max(0,enemy.hp-dmg);if(enemy.hp<=0){enemy.alive=false;enemy.respawn=3.5;enemy.group.visible=false;}}}
     if(hits.length===0){const worldHits=ray.intersectObjects(this.colliders.map(c=>c.object).filter(Boolean),false);if(worldHits.length){hitPoint=worldHits[0].point;hitNormal=worldHits[0].face?.normal||null;this.createBulletHole(hitPoint,hitNormal)}}
@@ -677,7 +700,7 @@ export class ZeroDivisionGame{
 
   startReload(){
     if(this.currentWeaponType==='melee'||this.reloading||this.magAmmo[this.currentWeaponType]>=this.getCurrentMagSize()||this.reserveAmmo[this.currentWeaponType]<=0)return;
-    this.reloading=true;this.firing=false;this.reloadTimer=(this.currentWeaponType==='primary'?WEAPONS.primary[state.primary]:WEAPONS.secondary[state.secondary]).reload;
+    this.reloading=true;this.firing=false;this.reloadDuration=(this.currentWeaponType==='primary'?WEAPONS.primary[state.primary]:WEAPONS.secondary[state.secondary]).reload;this.reloadTimer=this.reloadDuration;
   }
   startInspect(){if(!this.running||this.reloading||this.inspecting||this.currentWeaponType==='melee')return;this.inspecting=true;this.inspectTimer=1.8;this.firing=false;document.getElementById('game-ui').classList.add('hud-hidden');}
   useMedkit(){if(this.health>=100)return;this.health=Math.min(100,this.health+35);this.updateHUD();}
@@ -689,6 +712,8 @@ export class ZeroDivisionGame{
     // Single source of truth: pointer-lock view yaw/pitch drive camera-relative movement.
     this.yaw=this.controls.yaw;
     this.pitch=this.controls.pitch;
+    this.controls.updateRecoil(dt,this.getCurrentRecoilRecovery());
+    this.recoilBloom=Math.max(0,this.recoilBloom-dt*.006);
     if(state.settings.dashMode==='hold')this.dash=!!(this.keys.ControlLeft||this.keys.ControlRight);
     if(state.settings.crouchMode==='hold'&&!this.isSliding())this.crouch=!!(this.keys.ShiftLeft||this.keys.ShiftRight);
 
@@ -774,6 +799,12 @@ export class ZeroDivisionGame{
     this.camera.fov=THREE.MathUtils.damp(this.camera.fov,targetFov,12,dt);
     this.camera.updateProjectionMatrix();
   }
+  getCurrentRecoilRecovery(){
+    if(this.currentWeaponType==='melee')return 18;
+    const weapons=this.currentWeaponType==='primary'?WEAPONS.primary:WEAPONS.secondary;
+    const name=this.currentWeaponType==='primary'?state.primary:state.secondary;
+    return weapons[name]?.recoil?.recovery||14;
+  }
   updateWeaponAnimation(dt,moving){
     if(!this.weaponGroup)return;
     const t=performance.now()*.001;
@@ -791,7 +822,25 @@ export class ZeroDivisionGame{
       this._targetViewFov=normalPose.fov;
       if(adsPose) this._targetViewFov=THREE.MathUtils.lerp(normalPose.fov,adsPose.fov,this._adsBlend);
     }
-    // Subtle translational bob only; never alter weapon roll.
+    // Reload: lower and cant the weapon, then return it to the firing pose.
+    if(this.reloading&&this.reloadDuration>0){
+      const p=1-THREE.MathUtils.clamp(this.reloadTimer/this.reloadDuration,0,1);
+      const motion=Math.sin(p*Math.PI);
+      this.weaponGroup.position.x-=motion*.10;
+      this.weaponGroup.position.y-=motion*.18;
+      this.weaponGroup.position.z+=motion*.12;
+      this.weaponGroup.rotateX(motion*.36);
+      this.weaponGroup.rotateZ(-motion*.30);
+    }
+    // Sprinting keeps the muzzle up and out of the sight picture.
+    const sprintPose=this.dash&&moving&&!this.ads&&!this.reloading;
+    if(sprintPose){
+      this.weaponGroup.position.y-=.16;
+      this.weaponGroup.position.x+=.055;
+      this.weaponGroup.rotateX(.58);
+      this.weaponGroup.rotateZ(-.15);
+    }
+    // Subtle translational bob only; never alter weapon roll outside of animations.
     const bob=moving?Math.sin(t*(this.dash?14:10))*(this.dash?.012:.006):0;
     this.weaponGroup.position.y+=bob;
     if(this.isSliding())this.weaponGroup.position.y-=.03;
@@ -800,6 +849,9 @@ export class ZeroDivisionGame{
     const cross=document.getElementById('crosshair');
     if(cross){
       const hidden=this._adsBlend>.85||this.reloading||this.inspecting;
+      const speed=Math.hypot(this.velocity.x,this.velocity.z);
+      const gap=5+Math.min(23,this.recoilBloom*1150)+(this.ads?0:(speed>.15?4:0))+(this.canJump?0:4);
+      cross.style.setProperty('--crosshair-gap',`${gap.toFixed(1)}px`);
       cross.classList.toggle('ads-hidden',hidden);
       cross.style.opacity=hidden?'0':'1';
       cross.style.visibility=hidden?'hidden':'visible';
@@ -873,8 +925,15 @@ export class ZeroDivisionGame{
 }
 
 class SimplePointerLock extends EventTarget{
-  constructor(camera,domElement){super();this.camera=camera;this.domElement=domElement;this.isLocked=false;this.pointerSpeed=1;this.yaw=0;this.pitch=0;this._onMove=e=>this._move(e);this._onChange=()=>{const locked=document.pointerLockElement===this.domElement;if(locked!==this.isLocked){this.isLocked=locked;this.dispatchEvent(new Event(locked?'lock':'unlock'));}};document.addEventListener('pointerlockchange',this._onChange)}
-  lock(){this.camera.rotation.order='YXZ';this.yaw=this.camera.rotation.y;this.pitch=this.camera.rotation.x;this.camera.rotation.z=0;this.domElement.requestPointerLock?.();if(!this._listening){document.addEventListener('mousemove',this._onMove,false);this._listening=true}}
+  constructor(camera,domElement){super();this.camera=camera;this.domElement=domElement;this.isLocked=false;this.pointerSpeed=1;this.yaw=0;this.pitch=0;this.recoilYaw=0;this.recoilPitch=0;this._onMove=e=>this._move(e);this._onChange=()=>{const locked=document.pointerLockElement===this.domElement;if(locked!==this.isLocked){this.isLocked=locked;this.dispatchEvent(new Event(locked?'lock':'unlock'));}};document.addEventListener('pointerlockchange',this._onChange)}
+  lock(){this.camera.rotation.order='YXZ';this.yaw=this.camera.rotation.y-this.recoilYaw;this.pitch=this.camera.rotation.x-this.recoilPitch;this.camera.rotation.z=0;this.domElement.requestPointerLock?.();if(!this._listening){document.addEventListener('mousemove',this._onMove,false);this._listening=true}}
   unlock(){document.exitPointerLock?.();if(this._listening){document.removeEventListener('mousemove',this._onMove,false);this._listening=false}this.isLocked=false}
-  _move(e){if(!this.isLocked)return;const k=.0022*this.pointerSpeed*(window.ZERO_DIVISION_STATE?.settings?.sensitivity||1);this.yaw-=e.movementX*k;this.pitch-=e.movementY*k;const lim=Math.PI/2-.08;this.pitch=Math.max(-lim,Math.min(lim,this.pitch));this.camera.rotation.order='YXZ';this.camera.rotation.y=this.yaw;this.camera.rotation.x=this.pitch}
+  // Vertical recoil is applied to the player's aim, so sustained fire keeps climbing
+  // until the player compensates with the mouse. Horizontal recoil recentres naturally.
+  addRecoil(pitch,yaw){const lim=Math.PI/2-.08;this.pitch=Math.max(-lim,Math.min(lim,this.pitch-pitch));this.recoilYaw+=yaw;this._applyRotation()}
+  clearRecoil(){this.recoilYaw=0;this.recoilPitch=0;this._applyRotation()}
+  resetView(){this.yaw=0;this.pitch=0;this.recoilYaw=0;this.recoilPitch=0;this._applyRotation()}
+  updateRecoil(dt,recovery){this.recoilPitch=THREE.MathUtils.damp(this.recoilPitch,0,recovery,dt);this.recoilYaw=THREE.MathUtils.damp(this.recoilYaw,0,recovery*1.25,dt);this._applyRotation()}
+  _applyRotation(){const lim=Math.PI/2-.08;this.camera.rotation.order='YXZ';this.camera.rotation.y=this.yaw+this.recoilYaw;this.camera.rotation.x=Math.max(-lim,Math.min(lim,this.pitch+this.recoilPitch))}
+  _move(e){if(!this.isLocked)return;const k=.0022*this.pointerSpeed*(window.ZERO_DIVISION_STATE?.settings?.sensitivity||1);this.yaw-=e.movementX*k;this.pitch-=e.movementY*k;const lim=Math.PI/2-.08;this.pitch=Math.max(-lim-this.recoilPitch,Math.min(lim-this.recoilPitch,this.pitch));this._applyRotation()}
 }

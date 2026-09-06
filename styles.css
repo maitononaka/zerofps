@@ -81,3 +81,11 @@ canvas{display:block}
 .compass-heading{font-size:11px;color:#d9ff5f;font-weight:700;letter-spacing:.1em}
 .compass-notch{width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:7px solid #d9ff5f;margin:4px auto 3px}
 .compass-strip{font-size:10px;color:#d8e0e0;white-space:pre;letter-spacing:.28em}
+
+/* Dynamic hip-fire gap: the game updates this variable from weapon spread. */
+#crosshair{--crosshair-gap:5px;width:1px;height:1px}
+#crosshair i{transition:left .05s ease,top .05s ease}
+#crosshair i:nth-child(1){left:calc(-7px - var(--crosshair-gap));top:0}
+#crosshair i:nth-child(2){left:var(--crosshair-gap);right:auto;top:0}
+#crosshair i:nth-child(3){top:calc(-7px - var(--crosshair-gap));left:0}
+#crosshair i:nth-child(4){top:var(--crosshair-gap);bottom:auto;left:0}
