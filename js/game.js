@@ -7,6 +7,7 @@ const V3B = new THREE.Vector3();
 const UP = new THREE.Vector3(0,1,0);
 const TMP_M = new THREE.Matrix4();
 
+
 const WEAPONS = {
   primary: {
     'M4A1': {mag:30, rate:.105, damage:34, reload:1.35, color:0x171b1c},
@@ -24,7 +25,18 @@ export class ZeroDivisionGame{
   constructor(){
     this.scene=new THREE.Scene();
     this.camera=new THREE.PerspectiveCamera(78,innerWidth/innerHeight,.05,700);
-    this.renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
+    this.viewScene=new THREE.Scene();
+    this.viewCamera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,.01,100);
+    this.viewCamera.position.set(0,0,0);this.viewCamera.rotation.set(0,0,0);
+    this.viewCameraNormal=null;
+    this.viewCameraAds=null;
+    this.viewNormalPose=null;
+    this.viewAdsPose=null;
+
+    // Dedicated first-person view-model scene/camera. These must exist before the
+    // render loop starts; the previous build referenced them without creating them.
+    this.renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance',alpha:false});
+    this.renderer.autoClear=true;
     this.renderer.setSize(innerWidth,innerHeight);
     this.renderer.setPixelRatio(Math.min(devicePixelRatio,state.settings.pixelRatio));
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;
@@ -54,10 +66,10 @@ export class ZeroDivisionGame{
     this.reserveAmmo={primary:120,secondary:68,melee:0};
     this.reloading=false;this.reloadTimer=0;this.inspectTimer=0;this.inspecting=false;
     this.enemies=[];this.colliders=[];this.breakableGlass=[];this.bulletHoles=[];
-    this.mapGroup=null;this.handGroup=null;this.weaponGroup=null;this.weaponSight=null;this.muzzleFlash=null;this.weaponModel=null;this.weaponModelReady=false;this.weaponLoadPromise=null;this.weaponSocketData=null;
+    this.mapGroup=null;this.handGroup=null;this.weaponGroup=null;this.weaponSight=null;this.muzzleFlash=null;this.weaponModel=null;this.weaponModelReady=false;this.weaponLoadPromise=null;this.weaponSocketData=null;this.weaponConfig=null;this.weaponCameraNormal=null;this.weaponCameraAds=null;this.weaponNormalPose=null;this.weaponAdsPose=null;this._targetViewFov=45; this._adsBlend=0;
     this.lastFrameTime=performance.now();this.currentFPS=60;
     this.ping=24;this.packetLoss=0;this.audioCtx=null;
-    this.terrainMesh=null;
+    this.terrainMesh=null;this.weaponModelCenter=new THREE.Vector3();
     this.previewScene=null;this.previewCamera=null;this.previewRenderer=null;this.previewGroup=null;
 
     this.initLoadingPreview();
@@ -69,6 +81,7 @@ export class ZeroDivisionGame{
   bind(){
     addEventListener('resize',()=>{
       this.camera.aspect=innerWidth/innerHeight;this.camera.updateProjectionMatrix();
+      for(const c of [this.viewCamera,this.viewCameraNormal,this.viewCameraAds]){if(c){c.aspect=innerWidth/innerHeight;c.updateProjectionMatrix();}}
       this.renderer.setSize(innerWidth,innerHeight);
       this.renderer.setPixelRatio(Math.min(devicePixelRatio,state.settings.pixelRatio));
     });
@@ -110,7 +123,7 @@ export class ZeroDivisionGame{
   }
   onMouseUp(e){
     if(e.button===0)this.firing=false;
-    if(e.button===2){this.ads=false;this.updateHUD();}
+    if(e.button===2){this.ads=false;this.updateWeaponAnimation(0,false);this.updateHUD();}
   }
 
   onKey(e,down){
@@ -240,8 +253,8 @@ export class ZeroDivisionGame{
     document.getElementById('game-ui').classList.add('hidden');document.getElementById('loading-screen').classList.remove('active');document.getElementById('debug-panel').classList.add('hidden');
     go('deploy-screen');
     if(this.mapGroup){this.mapGroup.traverse(o=>{o.geometry?.dispose?.();if(Array.isArray(o.material))o.material.forEach(m=>m.dispose?.());else o.material?.dispose?.()});this.scene.remove(this.mapGroup)}
-    if(this.handGroup)this.camera.remove(this.handGroup);if(this.weaponGroup)this.camera.remove(this.weaponGroup);
-    this.handGroup=this.weaponGroup=null;this.mapGroup=null;this.colliders=[];this.enemies=[];this.breakableGlass=[];this.bulletHoles=[];this.terrainMesh=null;
+    if(this.handGroup&&this.handGroup.parent)this.handGroup.parent.remove(this.handGroup);if(this.weaponGroup&&this.weaponGroup.parent)this.weaponGroup.parent.remove(this.weaponGroup);
+    this.handGroup=this.weaponGroup=null;this.mapGroup=null;this.colliders=[];this.enemies=[];this.breakableGlass=[];this.bulletHoles=[];this.terrainMesh=null;this.weaponModelCenter=new THREE.Vector3();
   }
 
   buildScene(){
@@ -258,7 +271,7 @@ export class ZeroDivisionGame{
     else {this.addGround();this.addGrassClusters(false);state.map==='city'?this.buildCity():this.buildInterior();}
     this.addDistantSilhouette();
     this.spawnHumans(state.bots);
-    this.addWeapon();this.addHands();this.updateWeaponModel();
+    this.addWeapon();this.addHands();this.updateWeaponModel(); if(this.viewNormalPose||this.weaponNormalPose)this.setupViewCameras();
     const spawns={city:[0,8],mountain:[0,4],interior:[0,8]};const s=spawns[state.map]||spawns.city;this.playerPos.set(s[0],this.groundHeightAt(s[0],s[1]),s[1]);this.velocity.set(0,0,0);this.slideVelocity.set(0,0,0);this.canJump=true;
     this.eyeY=this.playerPos.y+1.72;
     this.camera.rotation.order='YXZ';this.camera.rotation.set(0,0,0);this.ads=false;this.updateCameraTransform(0);
@@ -354,44 +367,64 @@ export class ZeroDivisionGame{
   async preloadM4A1(){
     try{
       const loader=new GLTFLoader();
-      const [gltf,sockets]=await Promise.all([
+      const [gltf,config]=await Promise.all([
         new Promise((resolve,reject)=>loader.load('./assets/m4a1.glb',resolve,undefined,reject)),
-        fetch('./assets/m4a1_sockets.json').then(r=>r.ok?r.json():{}).catch(()=>({}))
+        fetch('./assets/m4a1_config.json').then(r=>r.ok?r.json():{sockets:{},cameras:{}}).catch(()=>({sockets:{},cameras:{}}))
       ]);
       const root=gltf.scene;
+      root.updateMatrixWorld(true);
+      // Preserve the model's original editor coordinate system. The JSON camera
+      // and socket coordinates are authored against this exact model space.
+      this.weaponModelCenter.set(0,0,0);
       root.traverse(o=>{
         if(o.isMesh){
-          o.castShadow=false;o.receiveShadow=false;
+          o.castShadow=false;o.receiveShadow=false;o.frustumCulled=false;
           if(o.material){o.material.transparent=false;o.material.depthWrite=true;}
         }
       });
-      // Derive the weapon's forward axis from the authored socket data instead of
-      // guessing the GLB orientation. This keeps the model and sockets in the same
-      // coordinate system and prevents the whole view-model from appearing reversed.
+      // IMPORTANT: preserve the exact model coordinate system authored by the editor.
+      // The camera + socket JSON is authored against this exact GLB orientation.
       root.position.set(0,0,0);
-      root.scale.setScalar(0.56);
-      const ss=sockets && sockets.sockets ? sockets.sockets : {};
-      const sv=(n)=>Array.isArray(ss[n]?.position) ? new THREE.Vector3(...ss[n].position) : null;
-      const muzzle=sv('muzzle');
-      const stock=sv('stock');
-      if(muzzle && stock){
-        const localForward=muzzle.clone().sub(stock).normalize();
-        const desiredForward=new THREE.Vector3(0,0,-1);
-        root.quaternion.setFromUnitVectors(localForward,desiredForward);
-      }else{
-        root.rotation.set(0,-Math.PI/2,0);
-      }
+      root.rotation.set(0,0,0);
+      root.scale.set(1,1,1);
       root.updateMatrixWorld(true);
-      root.userData.zeroDivisionSourceAxes='forward=stock→muzzle, desired=-Z';
+
       this.weaponModel=root;
-      this.weaponSocketData=sockets && sockets.sockets ? sockets : {sockets:{}};
+      this.weaponConfig=config;
+      this.weaponSocketData=config;
+      this.weaponCameraNormal=config.cameras?.normal||null;
+      this.weaponCameraAds=config.cameras?.ads||null;
+      this.weaponNormalPose=this.cameraConfigToViewmodelPose(this.weaponCameraNormal);
+      if(this.weaponNormalPose?.fov==null) this.weaponNormalPose.fov=45;
+      this.weaponAdsPose=this.cameraConfigToViewmodelPose(this.weaponCameraAds);
+      if(this.weaponAdsPose?.fov==null) this.weaponAdsPose.fov=45;
       this.weaponModelReady=true;
       return root;
     }catch(err){
-      console.warn('M4A1 GLB load failed; using fallback view-model.',err);
+      console.warn('M4A1 GLB/config load failed; using fallback view-model.',err);
       this.weaponModel=null;this.weaponModelReady=false;this.weaponSocketData={sockets:{}};
+      this.weaponConfig={};this.weaponCameraNormal=null;this.weaponCameraAds=null;
+      this.weaponNormalPose=null;this.weaponAdsPose=null;
       return null;
     }
+  }
+
+  cameraConfigToViewmodelPose(cam){
+    if(!cam||!Array.isArray(cam.position)||!Array.isArray(cam.rotation))return null;
+    const p=new THREE.Vector3(cam.position[0]||0,cam.position[1]||0,cam.position[2]||0);
+    const q=new THREE.Quaternion();
+    const e=new THREE.Euler(cam.rotation[0]||0,cam.rotation[1]||0,cam.rotation[2]||0,'XYZ');
+    q.setFromEuler(e);
+    return {position:p,quaternion:q,fov:Number.isFinite(cam.fov)?cam.fov:45};
+  }
+  
+  applyViewCameraPose(target,a,b,t){
+    if(!a&&!b)return;
+    if(!b)b=a;if(!a)a=b;
+    target.position.copy(a.position).lerp(b.position,t);
+    target.quaternion.copy(a.quaternion).slerp(b.quaternion,t).normalize();
+    target.fov=THREE.MathUtils.lerp(a.fov,b.fov,t);
+    target.updateProjectionMatrix();
   }
 
   addHands(){
@@ -402,10 +435,19 @@ export class ZeroDivisionGame{
     const glove=new THREE.MeshStandardMaterial({color:0x121619,roughness:.9,metalness:.02});
     const makeHand=(p,side)=>{
       const g=new THREE.Group();g.position.copy(p);
-      g.rotation.set(0,side==='right'?-0.10:0.10,side==='right'?.08:-.08);
-      const palm=new THREE.Mesh(new THREE.SphereGeometry(.085,10,8),glove);palm.scale.set(1.18,.72,1.25);g.add(palm);
-      const thumb=new THREE.Mesh(new THREE.CapsuleGeometry(.022,.075,5,7),glove);
-      thumb.position.set(side==='right'?.055:-.055,0,-.018);thumb.rotation.z=side==='right'?-0.75:0.75;g.add(thumb);
+      g.rotation.set(side==='right'?-0.05:0.05,side==='right'?0.10:-0.10,side==='right'?.12:-.12);
+      const palm=new THREE.Mesh(new THREE.SphereGeometry(.105,9,7),glove);
+      palm.scale.set(1.35,.82,1.55);g.add(palm);
+      const wrist=new THREE.Mesh(new THREE.CapsuleGeometry(.042,.10,5,7),glove);
+      wrist.position.set(0,-.05,.075);wrist.rotation.x=Math.PI/2;g.add(wrist);
+      const fingerXs=[-.045,0,.045];
+      for(const fx of fingerXs){
+        const f=new THREE.Mesh(new THREE.CapsuleGeometry(.019,.075,4,6),glove);
+        f.position.set(fx,.005,-.075);f.rotation.x=Math.PI/2;g.add(f);
+      }
+      const thumb=new THREE.Mesh(new THREE.CapsuleGeometry(.024,.085,5,6),glove);
+      thumb.position.set(side==='right'?.075:-.075,-.005,.005);
+      thumb.rotation.z=side==='right'?-0.65:0.65;g.add(thumb);
       return g;
     };
     const makeArm=(a,b,r=.055)=>{
@@ -422,11 +464,11 @@ export class ZeroDivisionGame{
   rebuildHandsFromSockets(makeArm,makeHand){
     if(!this.handGroup||!this.weaponModel)return;
     this.handGroup.clear();
-    const rp=this.getSocketInWeaponView('right_hand') || new THREE.Vector3(.10,-.35,-.65);
-    const lp=this.getSocketInWeaponView('left_hand') || new THREE.Vector3(-.08,-.33,-1.0);
-    const rShoulder=new THREE.Vector3(.18,-.34,-.28), lShoulder=new THREE.Vector3(-.16,-.34,-.26);
+    const rp=this.getSocketInWeaponView('right_hand') || new THREE.Vector3(.12,-.22,-.46);
+    const lp=this.getSocketInWeaponView('left_hand') || new THREE.Vector3(-.10,-.20,-.92);
+    const rShoulder=new THREE.Vector3(.30,-.30,-.18), lShoulder=new THREE.Vector3(-.30,-.30,-.18);
     const rElbow=rp.clone().lerp(rShoulder,.48), lElbow=lp.clone().lerp(lShoulder,.48);
-    for(const [a,b,r] of [[rShoulder,rElbow,.068],[rElbow,rp,.058],[lShoulder,lElbow,.068],[lElbow,lp,.058]]){const arm=makeArm(a,b,r);if(arm)this.handGroup.add(arm);}
+    for(const [a,b,r] of [[rShoulder,rElbow,.062],[rElbow,rp,.054],[lShoulder,lElbow,.062],[lElbow,lp,.054]]){const arm=makeArm(a,b,r);if(arm)this.handGroup.add(arm);}
     this.handGroup.add(makeHand(lp,'left'));this.handGroup.add(makeHand(rp,'right'));
   }
   attachHandsToWeaponModel(){
@@ -438,17 +480,42 @@ export class ZeroDivisionGame{
       const m=new THREE.Mesh(new THREE.CapsuleGeometry(r,Math.max(.02,len-r*2),6,8),new THREE.MeshStandardMaterial({color:0x20262a,roughness:.98}));
       m.position.copy(a).add(b).multiplyScalar(.5);m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dir.normalize());return m;
     },(p,side)=>{
-      const g=new THREE.Group();g.position.copy(p);g.rotation.set(0,side==='right'?-0.10:0.10,side==='right'?.08:-.08);
+      const g=new THREE.Group();g.position.copy(p);g.rotation.set(side==='right'?-0.05:0.05,side==='right'?0.10:-0.10,side==='right'?.12:-.12);
       const glove=new THREE.MeshStandardMaterial({color:0x121619,roughness:.9});
-      const palm=new THREE.Mesh(new THREE.SphereGeometry(.085,10,8),glove);palm.scale.set(1.18,.72,1.25);g.add(palm);return g;
+      const palm=new THREE.Mesh(new THREE.SphereGeometry(.105,9,7),glove);palm.scale.set(1.35,.82,1.55);g.add(palm);
+      const wrist=new THREE.Mesh(new THREE.CapsuleGeometry(.042,.10,5,7),glove);wrist.position.set(0,-.05,.075);wrist.rotation.x=Math.PI/2;g.add(wrist);
+      for(const fx of [-.045,0,.045]){const f=new THREE.Mesh(new THREE.CapsuleGeometry(.019,.075,4,6),glove);f.position.set(fx,.005,-.075);f.rotation.x=Math.PI/2;g.add(f);}
+      const thumb=new THREE.Mesh(new THREE.CapsuleGeometry(.024,.085,5,6),glove);thumb.position.set(side==='right'?.075:-.075,-.005,.005);thumb.rotation.z=side==='right'?-0.65:0.65;g.add(thumb);return g;
     });
   }
 
   addWeapon(){
     this.weaponGroup=new THREE.Group();
     this.weaponGroup.name='viewmodel-weapon';
-    this.camera.add(this.weaponGroup);
+    this.weaponGroup.renderOrder=1000;
+    this.weaponGroup.traverse(o=>{o.renderOrder=1000;});
+    this.viewScene.add(this.weaponGroup);
+    this.weaponGroup.visible=true;
+    this.weaponGroup.frustumCulled=false;
+    this.setupViewCameras();
     this.updateWeaponModel();
+  }
+  setupViewCameras(){
+    // One dedicated camera renders only the weapon/view-model scene. Its transform
+    // comes DIRECTLY from m4a1_config.json, so there is no inverse-matrix conversion
+    // and no JS-authored weapon tilt.
+    this.viewCameraNormal=this.weaponCameraNormal ? new THREE.PerspectiveCamera(this.weaponCameraNormal.fov||45,innerWidth/innerHeight,.01,100) : new THREE.PerspectiveCamera(45,innerWidth/innerHeight,.01,100);
+    this.viewCameraAds=this.weaponCameraAds ? new THREE.PerspectiveCamera(this.weaponCameraAds.fov||45,innerWidth/innerHeight,.01,100) : this.viewCameraNormal.clone();
+    this.viewScene.add(new THREE.HemisphereLight(0xf2fbff,0x30363a,2.4));
+    const key=new THREE.DirectionalLight(0xffffff,2.2);key.position.set(2,4,3);this.viewScene.add(key);
+    this.viewNormalPose=this.weaponNormalPose;
+    this.viewAdsPose=this.weaponAdsPose||this.weaponNormalPose;
+    if(this.viewNormalPose){
+      this.viewCamera.position.copy(this.viewNormalPose.position);
+      this.viewCamera.quaternion.copy(this.viewNormalPose.quaternion);
+      this.viewCamera.fov=this.viewNormalPose.fov;
+    }
+    this.viewCamera.updateProjectionMatrix();
   }
 
   updateWeaponModel(){
@@ -470,14 +537,14 @@ export class ZeroDivisionGame{
     if(this.weaponModelReady&&this.weaponModel&&this.currentWeaponType==='primary'&&state.primary==='M4A1'){
       if(this.weaponModel.parent!==this.weaponGroup)this.weaponGroup.add(this.weaponModel);
       this.weaponModel.visible=true;
-      // Model-local coordinates stay untouched; all FPS placement happens at the viewmodel root.
-      this.weaponModel.position.set(0,0,0);
-      // Preserve the orientation calculated during GLB load. Reassigning a fixed
-      // Euler rotation here was the source of the repeated reversed-view bug.
-      this.weaponModel.scale.setScalar(.56);
       this.weaponModel.updateMatrixWorld(true);
-      this.weaponGroup.position.set(.30,-.36,-1.22);
+      // WeaponRoot stays at identity. The JSON-authored camera is the only source
+      // of first-person framing; this prevents a second hidden position/rotation.
+      this.weaponGroup.position.set(0,0,0);
       this.weaponGroup.rotation.set(0,0,0);
+      this.weaponGroup.scale.set(1,1,1);
+      this.weaponGroup.updateMatrixWorld(true);
+      this._targetViewFov=this.viewNormalPose?.fov ?? 45;
       if(!this.handGroup)this.addHands(); else this.attachHandsToWeaponModel();
       this.rebuildSocketDrivenAttachments();
       return;
@@ -522,13 +589,13 @@ export class ZeroDivisionGame{
     return new THREE.Vector3(s.position[0],s.position[1],s.position[2]);
   }
   getSocketInWeaponView(name){
-    const v=this.getSocketVector(name);if(!v||!this.weaponModel)return null;
-    this.weaponModel.updateMatrix();
-    return v.applyMatrix4(this.weaponModel.matrix);
+    const s=this.weaponSocketData?.sockets?.[name];
+    if(!s||!Array.isArray(s.position))return null;
+    return new THREE.Vector3(s.position[0],s.position[1],s.position[2]).sub(this.weaponModelCenter);
   }
   getAdsAnchor(){
     const socket=(state.sight&&state.sight!=='なし')?'optic':'iron_rear';
-    return this.getSocketInWeaponView(socket) || new THREE.Vector3(.12,.18,.20);
+    return this.getSocketInWeaponView(socket) || new THREE.Vector3(0,.20,.28);
   }
 
   disposeObject3D(root){
@@ -727,47 +794,35 @@ export class ZeroDivisionGame{
     this.camera.position.y=this.eyeY+this.visualBob+shake;
     const rollTarget=-this.lean*.15;
     this.camera.rotation.z=THREE.MathUtils.damp(this.camera.rotation.z,rollTarget,18,dt);
-    const targetFov=this.ads?48:78;
+    const targetFov=78;
     this.camera.fov=THREE.MathUtils.damp(this.camera.fov,targetFov,12,dt);
     this.camera.updateProjectionMatrix();
   }
   updateWeaponAnimation(dt,moving){
-    if(!this.weaponGroup)return;
-    const t=performance.now()*.001;
-    const bob=moving?Math.sin(t*(this.dash?14:10))*(this.dash?.028:.014):0;
-    const adsLerp=this.ads?1:0;
-    // Weapon view positions are camera-local. ADS is computed from the actual
-    // optic socket, not a hard-coded point, so a future socket edit updates ADS automatically.
-    const normal=new THREE.Vector3(.30,-.30,-1.20);
-    let target=normal.clone();
-    const adsAnchor=this.getAdsAnchor();
-    if(adsAnchor){
-      const desiredSight=new THREE.Vector3(0,-.04,-.54);
-      const adsTarget=desiredSight.sub(adsAnchor);
-      target.lerp(adsTarget,adsLerp);
+    if(!this.weaponGroup||!this.viewCamera)return;
+    const n=this.viewNormalPose||this.weaponNormalPose;
+    const a=this.viewAdsPose||this.weaponAdsPose||n;
+    this._adsBlend=THREE.MathUtils.damp(this._adsBlend,this.ads?1:0,16,dt);
+    if(n&&a){
+      // Camera pose is the authoritative weapon frame. The M4A1 + hands remain
+      // fixed in the editor coordinate system, exactly as authored in JSON.
+      this.viewCamera.position.copy(n.position).lerp(a.position,this._adsBlend);
+      this.viewCamera.quaternion.copy(n.quaternion).slerp(a.quaternion,this._adsBlend).normalize();
+      this.viewCamera.fov=THREE.MathUtils.lerp(n.fov,a.fov,this._adsBlend);
+      this.viewCamera.updateProjectionMatrix();
     }
-    target.x+=this.lean*.035;
-    target.y+=bob*.45;
-    if(this.isSliding())target.y-=.13;
-    let rx=this.weaponKick;
-    if(this.reloading){
-      const base=this.currentWeaponType==='primary'?WEAPONS.primary[state.primary]:WEAPONS.secondary[state.secondary];
-      const p=1-Math.max(0,this.reloadTimer)/(base?.reload||1.3);
-      const wave=Math.sin(Math.min(1,p)*Math.PI);
-      target.x-=wave*.055;target.y-=wave*.10;rx=.22+wave*.08;
-    }
-    if(this.inspecting){
-      const p=1-Math.max(0,this.inspectTimer)/1.8;
-      const wave=Math.sin(Math.min(1,p)*Math.PI);
-      target.x+=.15*wave;target.y+=.08*wave;rx=.15*wave;
-      this.weaponGroup.rotation.y=.22*wave;
-    }else this.weaponGroup.rotation.y=0;
-    this.weaponGroup.position.copy(target);
-    this.weaponGroup.rotation.x=rx+THREE.MathUtils.lerp(-.03,0,adsLerp);
-    this.weaponGroup.rotation.z=-this.lean*.20;
-    this.weaponKick=THREE.MathUtils.damp(this.weaponKick,0,18,dt);
-    if(this.handGroup){
-      this.handGroup.visible=Boolean(state.settings.hands&&this.currentWeaponType!=='melee'&&this.weaponModel?.visible);
+
+    // No extra weapon roll, bob, recoil rotation, or forced offset here.
+    this.weaponGroup.position.set(0,0,0);
+    this.weaponGroup.quaternion.identity();
+    this.weaponGroup.scale.set(1,1,1);
+
+    const cross=document.getElementById('crosshair');
+    if(cross){
+      const hidden=this._adsBlend>0.05||this.reloading||this.inspecting;
+      cross.classList.toggle('ads-hidden',hidden);
+      cross.style.opacity=hidden?'0':'1';
+      cross.style.visibility=hidden?'hidden':'visible';
     }
   }
 
@@ -798,11 +853,49 @@ export class ZeroDivisionGame{
     const map={KeyW:'W',KeyA:'A',KeyS:'S',KeyD:'D',Space:'SPACE',ShiftLeft:'SHIFT',ShiftRight:'SHIFT',ControlLeft:'CTRL',ControlRight:'CTRL',KeyQ:'Q',KeyE:'E',KeyR:'R',KeyH:'H',Digit1:'1',Digit2:'2',Digit3:'3',Digit4:'4',Digit0:'0'};
     return [...new Set(Object.entries(this.keys).filter(([,down])=>down).map(([code])=>map[code]||code.replace(/^Key/,'')))].join(' + ');
   }
-  updateDebug(){const p=this.playerPos,s=this.velocity.length();const txt=[`ZERO DIVISION // DEBUG`,`FPS: ${Math.round(this.currentFPS||0)}`,`POS: ${p.x.toFixed(2)} / ${this.camera.position.y.toFixed(2)} / ${p.z.toFixed(2)}`,`VEL: ${s.toFixed(2)} m/s`,`MAP: ${state.map}`,`ENEMIES: ${this.enemies.filter(e=>e.alive).length}/${this.enemies.length}`,`WEAPON: ${this.currentWeaponType}`,`AMMO: ${this.currentWeaponType==='melee' ? '—' : (this.magAmmo[this.currentWeaponType] + ' / ' + this.reserveAmmo[this.currentWeaponType])}`,`PING: ${this.ping} ms`,`PACKET LOSS: ${this.packetLoss.toFixed(1)} %`,`DRAW CALLS: ${this.renderer.info.render.calls}`,`TRIANGLES: ${this.renderer.info.render.triangles}`,`PIXEL RATIO: ${this.renderer.getPixelRatio().toFixed(2)}`,`DASH: ${this.dash}  CROUCH: ${this.crouch}  SLIDE: ${this.isSliding()}  ADS: ${this.ads}  LEAN: ${this.lean.toFixed(2)}`,`VIEW YAW: ${(((this.yaw*180/Math.PI)%360)+360)%360).toFixed(1)}°`,`PRESSED: ${this.getPressedKeys()||'—'}`];document.getElementById('debug-lines').textContent=txt.join('\n')}
+  updateDebug(){
+    const p=this.playerPos;
+    const s=this.velocity.length();
+    const viewYaw=((this.yaw*180/Math.PI)%360+360)%360;
+    const txt=[
+      'ZERO DIVISION // DEBUG',
+      `FPS: ${Math.round(this.currentFPS||0)}`,
+      `POS: ${p.x.toFixed(2)} / ${this.camera.position.y.toFixed(2)} / ${p.z.toFixed(2)}`,
+      `VEL: ${s.toFixed(2)} m/s`,
+      `MAP: ${state.map}`,
+      `ENEMIES: ${this.enemies.filter(e=>e.alive).length}/${this.enemies.length}`,
+      `WEAPON: ${this.currentWeaponType}`,
+      `AMMO: ${this.currentWeaponType==='melee' ? '—' : (this.magAmmo[this.currentWeaponType] + ' / ' + this.reserveAmmo[this.currentWeaponType])}`,
+      `PING: ${this.ping} ms`,
+      `PACKET LOSS: ${this.packetLoss.toFixed(1)} %`,
+      `DRAW CALLS: ${this.renderer.info.render.calls}`,
+      `TRIANGLES: ${this.renderer.info.render.triangles}`,
+      `PIXEL RATIO: ${this.renderer.getPixelRatio().toFixed(2)}`,
+      `DASH: ${this.dash}  CROUCH: ${this.crouch}  SLIDE: ${this.isSliding()}  ADS: ${this.ads}  LEAN: ${this.lean.toFixed(2)}`,
+      `VIEW YAW: ${viewYaw.toFixed(1)}°`,
+      `PRESSED: ${this.getPressedKeys()||'—'}`
+    ];
+    document.getElementById('debug-lines').textContent=txt.join('\n');
+  }
 
   render(){
+    // Two scenes, one canvas: clear once, render the world, clear only depth,
+    // then overlay the transparent view-model scene.
+    this.renderer.autoClear=false;
+    this.renderer.clear(true,true,true);
     this.renderer.render(this.scene,this.camera);
-    if(this.previewRenderer&&this.previewScene&&document.getElementById('loading-screen')?.classList.contains('active')){const t=performance.now()*.00022;this.previewCamera.position.x=Math.cos(t)*17;this.previewCamera.position.z=Math.sin(t)*17;this.previewCamera.position.y=10.5;this.previewCamera.lookAt(0,1.5,0);this.previewRenderer.render(this.previewScene,this.previewCamera)}
+    if(this.running&&this.viewScene&&this.viewCamera){
+      this.renderer.clearDepth();
+      this.renderer.render(this.viewScene,this.viewCamera);
+    }
+    if(this.previewRenderer&&this.previewScene&&document.getElementById('loading-screen')?.classList.contains('active')){
+      const t=performance.now()*.00022;
+      this.previewCamera.position.x=Math.cos(t)*17;
+      this.previewCamera.position.z=Math.sin(t)*17;
+      this.previewCamera.position.y=10.5;
+      this.previewCamera.lookAt(0,1.5,0);
+      this.previewRenderer.render(this.previewScene,this.previewCamera);
+    }
   }
   animate(){requestAnimationFrame(()=>this.animate());const now=performance.now(),dt=Math.min(.05,Math.max(.001,(now-this.lastFrameTime)/1000));this.lastFrameTime=now;this.update(dt);this.render();this.currentFPS=Math.round(1/dt);const el=document.getElementById('fps');if(el)el.textContent=`${this.currentFPS} FPS`}
 }

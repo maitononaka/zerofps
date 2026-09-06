@@ -1,0 +1,331 @@
+      this.weaponGroup.position.copy(this.weaponNormalPose.position);
+      this.weaponGroup.quaternion.copy(this.weaponNormalPose.quaternion);
+      this.weaponGroup.updateMatrixWorld(true);
+      this._targetViewFov=Number.isFinite(this.weaponNormalPose.fov)?this.weaponNormalPose.fov:45;
+      if(!this.handGroup)this.addHands(); else this.attachHandsToWeaponModel();
+      this.rebuildSocketDrivenAttachments();
+      return;
+    }
+
+    const name=this.currentWeaponType==='primary'?state.primary:state.secondary;
+    const data=(this.currentWeaponType==='primary'?WEAPONS.primary:WEAPONS.secondary)[name]||WEAPONS.primary.M4A1;
+    const dark=new THREE.MeshStandardMaterial({color:data.color,roughness:.55,metalness:.28});
+    const matte=new THREE.MeshStandardMaterial({color:0x343b3e,roughness:.85});
+    const receiver=new THREE.Mesh(new THREE.BoxGeometry(.37,.26,1.03),dark);receiver.position.set(.12,-.37,-.86);this.weaponGroup.add(receiver);
+    const handguard=new THREE.Mesh(new THREE.BoxGeometry(.31,.20,.78),matte);handguard.position.set(.12,-.32,-1.65);this.weaponGroup.add(handguard);
+    const barrel=new THREE.Mesh(new THREE.CylinderGeometry(.042,.055,.72,14),dark);barrel.rotation.x=Math.PI/2;barrel.position.set(.12,-.33,-2.08);this.weaponGroup.add(barrel);
+    this.weaponGroup.position.set(.13,-.56,-.72);
+  }
+  rebuildSocketDrivenAttachments(){
+    const model=this.weaponModel;if(!model)return;
+    model.updateMatrixWorld(true);
+    const sockets=this.weaponSocketData?.sockets||{};
+    const canUse=name=>Boolean(sockets[name]?.enabled!==false);
+    const attachAtSocket=(name,buildFn,stateValue)=>{
+      if(!stateValue||stateValue==='なし'||!canUse(name))return null;
+      const obj=buildFn.call(this,stateValue);if(!obj)return null;
+      const p=this.getSocketInWeaponView(name);if(!p)return null;
+      obj.userData.zdAttachment=true;obj.position.copy(p);
+      const s=sockets[name];
+      if(Array.isArray(s.rotation)&&s.rotation.length===3)obj.rotation.set(s.rotation[0],s.rotation[1],s.rotation[2]);
+      // Socket scale is editor marker size, not attachment scale.
+      model.parent.add(obj);return obj;
+    };
+    if(state.sight && state.sight!=='なし')this.weaponSight=attachAtSocket('optic',this.buildSight,state.sight);
+    attachAtSocket('muzzle',this.buildMuzzle,state.muzzle);
+    attachAtSocket('stock',this.buildStock,state.stock);
+    const p=this.getSocketInWeaponView('muzzle');
+    if(p){
+      this.muzzleFlash=new THREE.Mesh(new THREE.SphereGeometry(.065,10,8),new THREE.MeshBasicMaterial({color:0xffe7a0,transparent:true,opacity:0,depthWrite:false}));
+      this.muzzleFlash.position.copy(p);this.muzzleFlash.userData.zdAttachment=true;this.weaponGroup.add(this.muzzleFlash);
+    }
+  }
+  getSocketVector(name){
+    const s=this.weaponSocketData?.sockets?.[name];
+    if(!s||s.enabled===false||!Array.isArray(s.position))return null;
+    return new THREE.Vector3(s.position[0],s.position[1],s.position[2]);
+  }
+  getSocketInWeaponView(name){
+    const s=this.weaponSocketData?.sockets?.[name];
+    if(!s||!Array.isArray(s.position))return null;
+    return new THREE.Vector3(s.position[0],s.position[1],s.position[2]).sub(this.weaponModelCenter);
+  }
+  getAdsAnchor(){
+    const socket=(state.sight&&state.sight!=='なし')?'optic':'iron_rear';
+    return this.getSocketInWeaponView(socket) || new THREE.Vector3(0,.20,.28);
+  }
+
+  disposeObject3D(root){
+    root.traverse?.(o=>{
+      if(o.geometry) o.geometry.dispose?.();
+      if(o.material){
+        if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose?.());
+        else o.material.dispose?.();
+      }
+    });
+  }
+  clearWeaponAttachments(root){
+    for(const child of [...root.children]){
+      if(child.userData?.zdAttachment){
+        root.remove(child);
+        this.disposeObject3D(child);
+      }
+    }
+  }
+  buildSight(type='なし'){
+    if(!type || type==='なし')return null;
+    const g=new THREE.Group();
+    g.userData.zdAttachment=true;
+    const dark=new THREE.MeshStandardMaterial({color:0x15191b,roughness:.42,metalness:.6});
+    const glass=new THREE.MeshBasicMaterial({color:0x8cc7ff,transparent:true,opacity:.5,roughness:0,depthWrite:false});
+    if(type==='ドットサイト'){
+      const base=new THREE.Mesh(new THREE.BoxGeometry(.13,.035,.19),dark);
+      base.position.y=0; g.add(base);
+      const hood=new THREE.Mesh(new THREE.BoxGeometry(.10,.10,.12),dark);
+      hood.position.y=.065; g.add(hood);
+      const lens=new THREE.Mesh(new THREE.PlaneGeometry(.065,.052),glass);
+      lens.position.set(0,.065,-.062); g.add(lens);
+      const dot=new THREE.Mesh(new THREE.SphereGeometry(.008,8,6),new THREE.MeshBasicMaterial({color:0xff3344}));
+      dot.position.set(0,.065,-.068); g.add(dot);
+    } else if(type==='ホロ'){
+      const base=new THREE.Mesh(new THREE.BoxGeometry(.15,.04,.21),dark);g.add(base);
+      const frame=new THREE.Mesh(new THREE.BoxGeometry(.13,.13,.12),dark);frame.position.y=.07;g.add(frame);
+      const lens=new THREE.Mesh(new THREE.PlaneGeometry(.095,.065),glass);lens.position.set(0,.07,-.062);g.add(lens);
+    } else {
+      const rail=new THREE.Mesh(new THREE.BoxGeometry(.115,.03,.18),dark);g.add(rail);
+      const front=new THREE.Mesh(new THREE.BoxGeometry(.025,.11,.025),dark);front.position.set(0,.065,-.055);g.add(front);
+      const rear=new THREE.Mesh(new THREE.BoxGeometry(.025,.09,.025),dark);rear.position.set(0,.055,.055);g.add(rear);
+    }
+    return g;
+  }
+  buildMuzzle(type='なし'){
+    if(!type || type==='なし')return null;
+    const g=new THREE.Group();
+    g.userData.zdAttachment=true;
+    const dark=new THREE.MeshStandardMaterial({color:0x161a1d,roughness:.5,metalness:.65});
+    let body;
+    if(type==='コンペンセータ'){
+      body=new THREE.Mesh(new THREE.CylinderGeometry(.06,.07,.16,12),dark);
+      body.rotation.x=Math.PI/2; g.add(body);
+      for(let i=-1;i<=1;i++){
+        const port=new THREE.Mesh(new THREE.BoxGeometry(.075,.016,.025),new THREE.MeshStandardMaterial({color:0x090b0c,roughness:1}));
+        port.position.set(0,.035,i*.045); g.add(port);
+      }
+    } else if(type==='静音モジュール'){
+      body=new THREE.Mesh(new THREE.CylinderGeometry(.075,.07,.28,14),dark);
+      body.rotation.x=Math.PI/2; g.add(body);
+      const ring=new THREE.Mesh(new THREE.CylinderGeometry(.08,.08,.025,14),dark);ring.rotation.x=Math.PI/2;ring.position.z=-.10;g.add(ring);
+    } else {
+      body=new THREE.Mesh(new THREE.CylinderGeometry(.05,.055,.11,12),dark);
+      body.rotation.x=Math.PI/2; g.add(body);
+    }
+    return g;
+  }
+  buildStock(type='なし'){
+    if(!type || type==='なし')return null;
+    const g=new THREE.Group();
+    g.userData.zdAttachment=true;
+    const dark=new THREE.MeshStandardMaterial({color:0x1a2022,roughness:.62,metalness:.32});
+    if(type==='軽量'){
+      const tube=new THREE.Mesh(new THREE.BoxGeometry(.11,.11,.42),dark);tube.position.z=.16;g.add(tube);
+      const pad=new THREE.Mesh(new THREE.BoxGeometry(.16,.19,.08),dark);pad.position.set(0,-.02,.38);g.add(pad);
+    } else if(type==='安定'){
+      const body=new THREE.Mesh(new THREE.BoxGeometry(.17,.24,.38),dark);body.position.z=.16;g.add(body);
+      const pad=new THREE.Mesh(new THREE.BoxGeometry(.19,.24,.08),dark);pad.position.set(0,-.01,.37);g.add(pad);
+    } else {
+      const tube=new THREE.Mesh(new THREE.BoxGeometry(.14,.14,.34),dark);tube.position.z=.14;g.add(tube);
+      const pad=new THREE.Mesh(new THREE.BoxGeometry(.17,.20,.075),dark);pad.position.set(0,-.01,.34);g.add(pad);
+    }
+    return g;
+  }
+
+  fire(){
+    if(!this.running||this.paused||this.reloading||this.inspecting)return;
+    if(this.currentWeaponType==='melee'){if(this.fireCooldown>0)return;this.fireCooldown=.45;this.weaponKick=.12;this.playShotSound('melee');return;}
+    const mag=this.magAmmo[this.currentWeaponType]||0;if(mag<=0){this.startReload();return;}if(this.fireCooldown>0)return;
+    const name=this.currentWeaponType==='primary'?state.primary:state.secondary,data=(this.currentWeaponType==='primary'?WEAPONS.primary:WEAPONS.secondary)[name];
+    this.fireCooldown=data.rate;this.magAmmo[this.currentWeaponType]--;this.weaponKick=.065;this.playShotSound('shot');
+    if(this.muzzleFlash){this.muzzleFlash.material.opacity=.96;this.muzzleFlash.scale.setScalar(1.6);setTimeout(()=>{if(this.muzzleFlash){this.muzzleFlash.material.opacity=0;this.muzzleFlash.scale.setScalar(1)}},45)}
+    const origin=this.camera.position.clone();const dir=this.getAimDirection();const tracerEnd=origin.clone().addScaledVector(dir,75);const ray=new THREE.Raycaster(origin,dir,.1,75);
+    const targets=[];this.mapGroup.traverse(o=>{if(o.isMesh&&o.userData.enemyId!==undefined&&o.parent?.visible!==false)targets.push(o)});const hits=ray.intersectObjects(targets,false);let hitPoint=tracerEnd;let hitNormal=null;
+    if(hits.length){hitPoint=hits[0].point;hitNormal=hits[0].face?.normal||null;const enemy=this.enemies[hits[0].object.userData.enemyId];if(enemy&&enemy.alive){const dmg=hits[0].object.userData.hitPart==='head'?Math.max(70,data.damage+25):data.damage;enemy.hp=Math.max(0,enemy.hp-dmg);if(enemy.hp<=0){enemy.alive=false;enemy.respawn=3.5;enemy.group.visible=false;}}}
+    if(hits.length===0){const worldHits=ray.intersectObjects(this.colliders.map(c=>c.object).filter(Boolean),false);if(worldHits.length){hitPoint=worldHits[0].point;hitNormal=worldHits[0].face?.normal||null;this.createBulletHole(hitPoint,hitNormal)}}
+    this.createTracer(origin,hitPoint);
+    this.updateHUD();
+  }
+  createTracer(a,b){const g=new THREE.BufferGeometry().setFromPoints([a,b]);const line=new THREE.Line(g,new THREE.LineBasicMaterial({color:0xffeeb0,transparent:true,opacity:.8,depthWrite:false}));this.scene.add(line);setTimeout(()=>{this.scene.remove(line);g.dispose();line.material.dispose()},65)}
+  createBulletHole(point,normal){const mat=new THREE.MeshBasicMaterial({color:0x161a1a,transparent:true,opacity:.86,depthWrite:false,side:THREE.DoubleSide});const hole=new THREE.Mesh(new THREE.CircleGeometry(.055,10),mat);hole.position.copy(point);if(normal)hole.lookAt(point.clone().add(normal));this.scene.add(hole);const obj={mesh:hole,ttl:15};this.bulletHoles.push(obj);}
+
+  startReload(){
+    if(this.currentWeaponType==='melee'||this.reloading||this.magAmmo[this.currentWeaponType]>=this.getCurrentMagSize()||this.reserveAmmo[this.currentWeaponType]<=0)return;
+    this.reloading=true;this.firing=false;this.reloadTimer=(this.currentWeaponType==='primary'?WEAPONS.primary[state.primary]:WEAPONS.secondary[state.secondary]).reload;
+  }
+  startInspect(){if(!this.running||this.reloading||this.inspecting||this.currentWeaponType==='melee')return;this.inspecting=true;this.inspectTimer=1.8;this.firing=false;document.getElementById('game-ui').classList.add('hud-hidden');}
+  useMedkit(){if(this.health>=100)return;this.health=Math.min(100,this.health+35);this.updateHUD();}
+  getCurrentMagSize(){if(this.currentWeaponType==='melee')return 0;const data=(this.currentWeaponType==='primary'?WEAPONS.primary:WEAPONS.secondary)[this.currentWeaponType==='primary'?state.primary:state.secondary];return data?.mag||30}
+  playShotSound(kind){try{this.audioCtx=this.audioCtx || new(window.AudioContext||window.webkitAudioContext)();if(this.audioCtx.state==='suspended')this.audioCtx.resume();const t=this.audioCtx.currentTime,o=this.audioCtx.createOscillator(),g=this.audioCtx.createGain();o.type=kind==='melee'?'triangle':'square';o.frequency.setValueAtTime(kind==='melee'?90:150,t);o.frequency.exponentialRampToValueAtTime(kind==='melee'?55:70,t+.09);g.gain.setValueAtTime(.001,t);g.gain.exponentialRampToValueAtTime(kind==='melee'?.05:.16,t+.004);g.gain.exponentialRampToValueAtTime(.001,t+.12);o.connect(g).connect(this.audioCtx.destination);o.start(t);o.stop(t+.13)}catch{}}
+
+  update(dt){
+    if(!this.running||this.paused)return;
+    // Single source of truth: pointer-lock view yaw/pitch drive camera-relative movement.
+    this.yaw=this.controls.yaw;
+    this.pitch=this.controls.pitch;
+    if(state.settings.dashMode==='hold')this.dash=!!(this.keys.ControlLeft||this.keys.ControlRight);
+    if(state.settings.crouchMode==='hold'&&!this.isSliding())this.crouch=!!(this.keys.ShiftLeft||this.keys.ShiftRight);
+
+    const movingInput=this.isMoving();
+    if(!this.isSliding()&&!movingInput)this.dash=false;
+    if(this.dash&&!movingInput)this.dash=false;
+
+    if(this.isSliding()){
+      this.slideTimer=Math.max(0,this.slideTimer-dt);
+      const speed=this.slideVelocity.length();
+      const friction=9.2;
+      const newSpeed=Math.max(0,speed-friction*dt);
+      if(speed>0.001)this.slideVelocity.multiplyScalar(newSpeed/speed);
+      if(newSpeed<1.25||this.slideTimer<=0){
+        this.slideTimer=0;this.slideVelocity.set(0,0,0);this.crouch=false;
+      }
+      this.velocity.x=this.slideVelocity.x;this.velocity.z=this.slideVelocity.z;
+    }else{
+      if(this.dash&&!this.crouch)this.stamina=Math.max(0,this.stamina-dt*23);
+      else this.stamina=Math.min(100,this.stamina+dt*14);
+      if(this.stamina<6)this.dash=false;
+      const speed=this.crouch?2.35:(this.dash?8.4:4.6);
+      let f=(this.keys.KeyW?1:0)-(this.keys.KeyS?1:0),r=(this.keys.KeyD?1:0)-(this.keys.KeyA?1:0);
+      const len=Math.hypot(f,r);if(len>0){f/=len;r/=len;}
+      // The camera's pitch/roll must never affect horizontal movement.
+      // `this.yaw` is the single source of truth for horizontal view direction.
+      // At yaw=0, W points toward world -Z; turning right makes W rotate with the view.
+      const sy=Math.sin(this.yaw),cy=Math.cos(this.yaw);
+      const forward=this._moveForward.set(-sy,0,-cy);
+      const side=this._moveRight.set(cy,0,-sy);
+      const wish=this._moveWish.copy(forward).multiplyScalar(f).addScaledVector(side,r);
+      if(len>0)wish.multiplyScalar(speed);
+      const accel=len>0?(this.crouch?15:18):24;
+      this.velocity.x=THREE.MathUtils.damp(this.velocity.x,len>0?wish.x:0,accel,dt);
+      this.velocity.z=THREE.MathUtils.damp(this.velocity.z,len>0?wish.z:0,accel,dt);
+    }
+
+    const nx=this.playerPos.x+this.velocity.x*dt,nz=this.playerPos.z+this.velocity.z*dt;
+    let blocked=false;
+    for(const c of this.colliders){
+      if(nx>c.minX-.42&&nx<c.maxX+.42&&nz>c.minZ-.42&&nz<c.maxZ+.42){blocked=true;break;}
+    }
+    if(!blocked){this.playerPos.x=nx;this.playerPos.z=nz;}else if(this.isSliding()){this.slideVelocity.multiplyScalar(.5);this.velocity.x=this.slideVelocity.x;this.velocity.z=this.slideVelocity.z;}else{this.velocity.x*=.35;this.velocity.z*=.35;}
+
+    const ground=this.groundHeightAt(this.playerPos.x,this.playerPos.z);
+    const stance=this.isSliding()?1.00:(this.crouch?1.08:1.72);
+    const targetGround=ground+stance;
+    this.velocity.y-=20.5*dt;
+    let nextY=this.eyeY+this.velocity.y*dt;
+    if(nextY<=targetGround){nextY=targetGround;this.velocity.y=0;this.canJump=true;}else this.canJump=false;
+    this.eyeY=nextY;
+    this.updateCameraTransform(dt);
+
+    if(this.firing&&(this.currentWeaponType==='primary'||this.currentWeaponType==='secondary'))this.fire();
+    if(this.fireCooldown>0)this.fireCooldown=Math.max(0,this.fireCooldown-dt);
+    if(this.reloading){this.reloadTimer-=dt;if(this.reloadTimer<=0){const need=this.getCurrentMagSize()-this.magAmmo[this.currentWeaponType],take=Math.min(need,this.reserveAmmo[this.currentWeaponType]);this.magAmmo[this.currentWeaponType]+=take;this.reserveAmmo[this.currentWeaponType]-=take;this.reloading=false;}}
+    if(this.inspecting){this.inspectTimer-=dt;if(this.inspectTimer<=0){this.inspecting=false;document.getElementById('game-ui').classList.remove('hud-hidden');}}
+    this.updateWeaponAnimation(dt,movingInput);
+    this.updateEnemies(dt);
+    this.updateEffects(dt);
+    this.ping=Math.round(18+Math.sin(performance.now()*.0007)*5+Math.random()*5);this.packetLoss=Math.random()<.028?Number((Math.random()*.7).toFixed(1)):0;
+    this.updateHUD();this.updateDebug();
+  }
+  updateCameraTransform(dt){
+    const t=performance.now()*.001;
+    const moving=(Math.hypot(this.velocity.x,this.velocity.z)>0.15);
+    const walkFreq=this.dash?14:(this.crouch?9:11);
+    const bobAmp=this.isSliding()?.008:(this.crouch?.012:.022);
+    this.visualBob=moving?Math.sin(t*walkFreq)*bobAmp:THREE.MathUtils.damp(this.visualBob,0,12,dt);
+    const shakeAmp=this.dash?state.settings.shake*.018:0;
+    const shake=Math.sin(t*26)*shakeAmp;
+    const leanTarget=this.keys.KeyQ?-1:(this.keys.KeyE?1:0);
+    this.lean=THREE.MathUtils.damp(this.lean,leanTarget,14,dt);
+    const sy=Math.sin(this.yaw),cy=Math.cos(this.yaw);
+    const right=new THREE.Vector3(cy,0,-sy);
+    const leanAmount=this.lean*.48;
+    this.camera.position.x=this.playerPos.x+right.x*leanAmount;
+    this.camera.position.z=this.playerPos.z+right.z*leanAmount;
+    this.camera.position.y=this.eyeY+this.visualBob+shake;
+    const rollTarget=-this.lean*.15;
+    this.camera.rotation.z=THREE.MathUtils.damp(this.camera.rotation.z,rollTarget,18,dt);
+    const targetFov=Number.isFinite(this._targetViewFov)?this._targetViewFov:45;
+    this.camera.fov=THREE.MathUtils.damp(this.camera.fov,targetFov,12,dt);
+    this.camera.updateProjectionMatrix();
+  }
+  updateWeaponAnimation(dt,moving){
+    if(!this.weaponGroup)return;
+    const t=performance.now()*.001;
+    this._adsBlend=THREE.MathUtils.damp(this._adsBlend,this.ads?1:0,16,dt);
+    const normalPose=this.weaponCameraNormal?this.cameraConfigToViewmodelPose(this.weaponCameraNormal):null;
+    const adsPose=this.weaponCameraAds?this.cameraConfigToViewmodelPose(this.weaponCameraAds):normalPose;
+    // Single-camera view-model: use the editor's camera pose directly as a local
+    // weapon transform. No extra yaw/pitch/roll is injected here.
+    if(normalPose){
+      const pos=normalPose.position.clone().lerp((adsPose||normalPose).position,this._adsBlend);
+      const quat=normalPose.quaternion.clone().slerp((adsPose||normalPose).quaternion,this._adsBlend).normalize();
+      this.weaponGroup.position.copy(pos);
+      this.weaponGroup.quaternion.copy(quat);
+      this.weaponGroup.scale.set(1,1,1);
+      this._targetViewFov=normalPose.fov;
+      if(adsPose) this._targetViewFov=THREE.MathUtils.lerp(normalPose.fov,adsPose.fov,this._adsBlend);
+    }
+    // Subtle translational bob only; never alter weapon roll.
+    const bob=moving?Math.sin(t*(this.dash?14:10))*(this.dash?.012:.006):0;
+    this.weaponGroup.position.y+=bob;
+    if(this.isSliding())this.weaponGroup.position.y-=.03;
+    this.weaponGroup.position.z+=this.weaponKick*.012;
+    this.weaponKick=THREE.MathUtils.damp(this.weaponKick,0,18,dt);
+    const cross=document.getElementById('crosshair');
+    if(cross){
+      const hidden=this._adsBlend>.85||this.reloading||this.inspecting;
+      cross.classList.toggle('ads-hidden',hidden);
+      cross.style.opacity=hidden?'0':'1';
+      cross.style.visibility=hidden?'hidden':'visible';
+    }
+  }
+
+  updateEnemies(dt){
+    const now=performance.now()*.00055;this.enemies.forEach((e,i)=>{if(!e.alive){e.respawn-=dt;if(e.respawn<=0){e.alive=true;e.hp=100;e.group.visible=true;e.group.position.copy(e.origin)}return}const x=e.origin.x+Math.sin(now+e.phase)*2.2,z=e.origin.z+Math.cos(now*.92+e.phase)*2.2;e.group.position.x=x;e.group.position.z=z;e.group.position.y=this.groundHeightAt(x,z);e.group.rotation.y=Math.sin(now+e.phase)*.3});
+  }
+  updateEffects(dt){for(let i=this.bulletHoles.length-1;i>=0;i--){const h=this.bulletHoles[i];h.ttl-=dt;if(h.ttl<=0){this.scene.remove(h.mesh);h.mesh.geometry.dispose();h.mesh.material.dispose();this.bulletHoles.splice(i,1)}}}
+
+  updateHUD(){
+    const stance=this.isSliding()?'スライド':(this.crouch?'しゃがみ':'立ち');document.getElementById('stance').textContent=stance;document.getElementById('drive').textContent=this.dash?'ダッシュ':this.isMoving()?'歩行':'停止';document.getElementById('hud-state').textContent=this.reloading?'リロード中':this.inspecting?'点検中':this.ads?'ADS':this.isSliding()?'スライド':this.dash?'高速移動':'準備完了';document.getElementById('enemy-counter').textContent=String(this.enemies.filter(e=>e.alive).length);
+    const weaponName=this.currentWeaponType==='primary'?state.primary:this.currentWeaponType==='secondary'?state.secondary:state.melee;document.getElementById('weapon-hud').textContent=weaponName;document.getElementById('ammo-value').textContent=this.currentWeaponType==='melee'?'—':`${this.magAmmo[this.currentWeaponType]} / ${this.reserveAmmo[this.currentWeaponType]}`;document.getElementById('fire-mode').textContent=this.currentWeaponType==='melee'?'近接':this.currentWeaponType==='primary'?'連射':'半自動';
+    const hp=document.getElementById('hp-fill');if(hp)hp.style.width=`${this.health}%`;const hv=document.getElementById('hp-value');if(hv)hv.textContent=Math.round(this.health);const sv=document.getElementById('stamina-fill');if(sv)sv.style.width=`${this.stamina}%`;const st=document.getElementById('stamina-value');if(st)st.textContent=Math.round(this.stamina);document.getElementById('ping').textContent=`${this.ping} ms`;document.getElementById('packet-loss').textContent=`${this.packetLoss.toFixed(1)} %`;this.updateCompass();
+  }
+  updateCompass(){
+    const wrap=document.getElementById('compass');if(!wrap)return;
+    wrap.classList.toggle('hidden',!state.settings.compass);
+    if(!state.settings.compass)return;
+    const deg=(this.yaw*180/Math.PI%360+360)%360;
+    const headingEl=document.getElementById('compass-heading');if(headingEl)headingEl.textContent=String(Math.round(deg)).padStart(3,'0')+'°';
+    const strip=document.getElementById('compass-strip');if(!strip)return;
+    const labels=['N','NE','E','SE','S','SW','W','NW'];
+    const center=Math.round(deg/22.5)*22.5;
+    const items=[];for(let i=-2;i<=2;i++){const d=(center+i*22.5+360)%360;items.push(labels[Math.round(d/45)%8]);}
+    strip.textContent=items.join('     ');
+  }
+
+  getPressedKeys(){
+    const map={KeyW:'W',KeyA:'A',KeyS:'S',KeyD:'D',Space:'SPACE',ShiftLeft:'SHIFT',ShiftRight:'SHIFT',ControlLeft:'CTRL',ControlRight:'CTRL',KeyQ:'Q',KeyE:'E',KeyR:'R',KeyH:'H',Digit1:'1',Digit2:'2',Digit3:'3',Digit4:'4',Digit0:'0'};
+    return [...new Set(Object.entries(this.keys).filter(([,down])=>down).map(([code])=>map[code]||code.replace(/^Key/,'')))].join(' + ');
+  }
+  updateDebug(){
+    const p=this.playerPos;
+    const s=this.velocity.length();
+    const viewYaw=((this.yaw*180/Math.PI)%360+360)%360;
+    const txt=[
+      'ZERO DIVISION // DEBUG',
+      `FPS: ${Math.round(this.currentFPS||0)}`,
+      `POS: ${p.x.toFixed(2)} / ${this.camera.position.y.toFixed(2)} / ${p.z.toFixed(2)}`,
+      `VEL: ${s.toFixed(2)} m/s`,
+      `MAP: ${state.map}`,
+      `ENEMIES: ${this.enemies.filter(e=>e.alive).length}/${this.enemies.length}`,
+      `WEAPON: ${this.currentWeaponType}`,
+      `AMMO: ${this.currentWeaponType==='melee' ? '—' : (this.magAmmo[this.currentWeaponType] + ' / ' + this.reserveAmmo[this.currentWeaponType])}`,
+      `PING: ${this.ping} ms`,
+      `PACKET LOSS: ${this.packetLoss.toFixed(1)} %`,

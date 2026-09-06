@@ -170,7 +170,7 @@
           const fill=$('loading-fill'), percent=$('loading-percent'), status=$('loading-status');
           if(fill)fill.style.width='6%'; if(percent)percent.textContent='6%'; if(status)status.textContent='ゲーム本体を読み込んでいます…';
           try{
-            const mod=await import('./js/game.js?build=1810');
+            const mod=await import('./js/game.js?build=3200');
             if(!window.ZERO_DIVISION_GAME) window.ZERO_DIVISION_GAME=new mod.ZeroDivisionGame();
             await window.ZERO_DIVISION_GAME.start(state.map,state.bots);
           }catch(err){
