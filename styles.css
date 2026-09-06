@@ -82,6 +82,11 @@ canvas{display:block}
 .compass-notch{width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:7px solid #d9ff5f;margin:4px auto 3px}
 .compass-strip{font-size:10px;color:#d8e0e0;white-space:pre;letter-spacing:.28em}
 
+.ads-tuner em{display:block;margin:10px 0 3px;color:#7f9498;font-style:normal;font-size:9px;letter-spacing:.16em}.ads-tuner label{grid-template-columns:78px 1fr 46px}.ads-tuner label.ads-check{display:flex;gap:7px;margin:10px 0 0;color:#d9ff5f}.ads-tuner label.ads-check input{width:auto}
+
+/* In-game ADS calibration panel (open with 0). */
+.debug-panel{pointer-events:auto;min-width:360px;max-width:430px}.ads-tuner{margin-top:10px;padding-top:9px;border-top:1px solid rgba(217,255,95,.32);color:#dce9e8}.ads-tuner>b{display:block;color:#d9ff5f;letter-spacing:.14em;font-size:11px}.ads-tuner small{display:block;color:#8c9da1;margin:3px 0 8px;font-size:10px}.ads-tuner label{display:grid;grid-template-columns:38px 1fr 46px;align-items:center;gap:8px;margin:5px 0;font-size:11px}.ads-tuner input{accent-color:#d9ff5f}.ads-tuner output{text-align:right;color:#d9ff5f}.ads-tuner div{display:flex;gap:6px;margin-top:9px}.ads-tuner button{pointer-events:auto;flex:1;padding:6px 5px;background:#162025;border:1px solid #405057;color:#e6efef;font:10px ui-monospace,SFMono-Regular,Consolas,monospace;cursor:pointer}.ads-tuner button:hover{border-color:#d9ff5f;color:#d9ff5f}
+
 /* Dynamic hip-fire gap: the game updates this variable from weapon spread. */
 #crosshair{--crosshair-gap:5px;width:1px;height:1px}
 #crosshair i{transition:left .05s ease,top .05s ease}
@@ -89,3 +94,5 @@ canvas{display:block}
 #crosshair i:nth-child(2){left:var(--crosshair-gap);right:auto;top:0}
 #crosshair i:nth-child(3){top:calc(-7px - var(--crosshair-gap));left:0}
 #crosshair i:nth-child(4){top:var(--crosshair-gap);bottom:auto;left:0}
+
+.ads-tuner em{display:block;margin:10px 0 3px;color:#7f9498;font-style:normal;font-size:9px;letter-spacing:.16em}.ads-tuner label{grid-template-columns:78px 1fr 46px}.ads-tuner label.ads-check{display:flex;gap:7px;margin:10px 0 0;color:#d9ff5f}.ads-tuner label.ads-check input{width:auto}

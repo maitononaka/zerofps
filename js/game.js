@@ -6,6 +6,8 @@ const V3 = new THREE.Vector3();
 const V3B = new THREE.Vector3();
 const UP = new THREE.Vector3(0,1,0);
 const TMP_M = new THREE.Matrix4();
+// Runtime-editable ADS trim. Press 0 in-game to tune and export this file.
+const ADS_TUNE = { x: -.024, y: 0, z: 0, pitch: -.077, yaw: -.039, roll: -.006, scale: 1, level: false };
 
 const WEAPONS = {
   primary: {
@@ -51,12 +53,13 @@ export class ZeroDivisionGame{
     this.canJump=false;
     this.dash=false;this.crouch=false;this.slideTimer=0;this.slideVelocity=new THREE.Vector3();this.lean=0;this.ads=false;this.eyeY=1.72;this.visualBob=0;
     this.running=false;this.paused=false;this.debug=false;
+    this.adsTune={...ADS_TUNE};
     this.health=100;this.stamina=100;
     this.firing=false;this.fireCooldown=0;this.weaponKick=0;this.recoilBloom=0;
     this.currentWeaponType='primary';
     this.magAmmo={primary:30,secondary:17,melee:0};
     this.reserveAmmo={primary:120,secondary:68,melee:0};
-    this.reloading=false;this.reloadTimer=0;this.reloadDuration=0;this.inspectTimer=0;this.inspecting=false;
+    this.reloading=false;this.reloadTimer=0;this.reloadDuration=0;this.reloadBlend=0;this.sprintBlend=0;this.inspectTimer=0;this.inspecting=false;
     this.enemies=[];this.colliders=[];this.breakableGlass=[];this.bulletHoles=[];
     this.mapGroup=null;this.handGroup=null;this.weaponGroup=null;this.weaponSight=null;this.muzzleFlash=null;this.weaponModel=null;this.weaponModelReady=false;this.weaponLoadPromise=null;this.weaponSocketData=null;this.weaponConfig=null;this.weaponCameraNormal=null;this.weaponCameraAds=null;this.weaponNormalPose=null;this.weaponAdsPose=null;this._targetViewFov=45; this._adsBlend=0;
     this.lastFrameTime=performance.now();this.currentFPS=60;
@@ -67,6 +70,7 @@ export class ZeroDivisionGame{
     this.initLoadingPreview();
     this.weaponLoadPromise=this.preloadM4A1();
     this.bind();
+    this.initAdsTuner();
     this.animate();
   }
 
@@ -88,7 +92,7 @@ export class ZeroDivisionGame{
       document.getElementById('hint').style.display='none';
     });
     this.controls.addEventListener('unlock',()=>{
-      if(this.running && !this.paused){
+      if(this.running && !this.paused && !this.debug){
         this.paused=true;this.firing=false;
         document.getElementById('pause-card') && document.getElementById('pause-card').classList.remove('hidden');
       }
@@ -174,7 +178,36 @@ export class ZeroDivisionGame{
   isSliding(){return this.slideTimer>0;}
   isMoving(){return !!(this.keys.KeyW||this.keys.KeyA||this.keys.KeyS||this.keys.KeyD);}
 
-  toggleDebug(){this.debug=!this.debug;document.getElementById('debug-panel').classList.toggle('hidden',!this.debug);}
+  toggleDebug(){
+    this.debug=!this.debug;
+    document.getElementById('debug-panel').classList.toggle('hidden',!this.debug);
+    if(this.debug){
+      document.getElementById('pause-card')?.classList.add('hidden');
+      this.controls.unlock();
+      this.updateAdsTunerValues();
+    }else if(this.running&&!this.paused)this.controls.lock();
+  }
+  initAdsTuner(){
+    const panel=document.getElementById('debug-panel');if(!panel)return;
+    panel.querySelectorAll('[data-ads-tune]').forEach(input=>input.addEventListener('input',e=>{
+      const key=e.currentTarget.dataset.adsTune;this.adsTune[key]=e.currentTarget.type==='checkbox'?e.currentTarget.checked:Number(e.currentTarget.value);this.updateAdsTunerValues();
+    }));
+    document.getElementById('ads-tune-copy')?.addEventListener('click',()=>navigator.clipboard?.writeText(this.adsTuneSource()));
+    document.getElementById('ads-tune-download')?.addEventListener('click',()=>this.downloadTunedGameJs());
+    document.getElementById('ads-tune-reset')?.addEventListener('click',()=>{this.adsTune={...ADS_TUNE};this.updateAdsTunerValues();});
+  }
+  adsTuneSource(){const t=this.adsTune;return `const ADS_TUNE = { x: ${t.x.toFixed(3)}, y: ${t.y.toFixed(3)}, z: ${t.z.toFixed(3)}, pitch: ${t.pitch.toFixed(3)}, yaw: ${t.yaw.toFixed(3)}, roll: ${t.roll.toFixed(3)}, scale: ${t.scale.toFixed(3)}, level: ${t.level} };`;}
+  updateAdsTunerValues(){
+    document.querySelectorAll('[data-ads-tune]').forEach(input=>{const key=input.dataset.adsTune;if(input.type==='checkbox')input.checked=this.adsTune[key];else input.value=this.adsTune[key];const output=document.querySelector(`[data-ads-value="${key}"]`);if(output)output.textContent=this.adsTune[key].toFixed(3);});
+  }
+  async downloadTunedGameJs(){
+    const source=this.adsTuneSource();
+    try{
+      const original=await fetch('./js/game.js',{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error();return r.text()});
+      const tuned=original.replace(/const ADS_TUNE = \{ x: [^;]+;/,source);
+      const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([tuned],{type:'text/javascript'}));link.download='game.js';link.click();URL.revokeObjectURL(link.href);
+    }catch{navigator.clipboard?.writeText(source);}
+  }
 
   mapLabel(map){return map==='city'?'市街地 / ブロック7':map==='mountain'?'山岳 / 森林リッジ':'室内 / 施設03'}
   missionData(map){
@@ -819,13 +852,35 @@ export class ZeroDivisionGame{
       this.weaponGroup.position.copy(pos);
       this.weaponGroup.quaternion.copy(quat);
       this.weaponGroup.scale.set(1,1,1);
+      // The GLB's optic socket is authored in a different space from the
+      // view-model. Use a deliberately small ADS trim rather than deriving a
+      // full transform from that socket, which can throw the weapon off-screen.
+      if(this._adsBlend>.001){
+        const tune=this.adsTune,blend=this._adsBlend;
+        this.weaponGroup.position.x+=tune.x*blend;
+        // Camera-local +Y moves the model up on screen; the sight needs to sit
+        // lower. Counter the GLB's left lean with a small rightward ADS roll.
+        this.weaponGroup.position.y+=tune.y*blend;
+        this.weaponGroup.position.z+=tune.z*blend;
+        if(tune.level){
+          // Rebuild the local rotation as if the camera only had yaw: the gun
+          // continues to turn left/right but its barrel stays ground-parallel.
+          const yawOnly=new THREE.Quaternion().setFromEuler(new THREE.Euler(0,this.camera.rotation.y,0,'YXZ'));
+          this.weaponGroup.quaternion.copy(this.camera.quaternion.clone().invert().multiply(yawOnly).multiply(this.weaponGroup.quaternion)).normalize();
+        }
+        this.weaponGroup.rotateX(tune.pitch*blend);
+        this.weaponGroup.rotateY(tune.yaw*blend);
+        this.weaponGroup.rotateZ(tune.roll*blend);
+        this.weaponGroup.scale.multiplyScalar(THREE.MathUtils.lerp(1,tune.scale,blend));
+      }
       this._targetViewFov=normalPose.fov;
       if(adsPose) this._targetViewFov=THREE.MathUtils.lerp(normalPose.fov,adsPose.fov,this._adsBlend);
     }
     // Reload: lower and cant the weapon, then return it to the firing pose.
-    if(this.reloading&&this.reloadDuration>0){
+    this.reloadBlend=THREE.MathUtils.damp(this.reloadBlend,this.reloading?1:0,14,dt);
+    if(this.reloadBlend>.001&&this.reloadDuration>0){
       const p=1-THREE.MathUtils.clamp(this.reloadTimer/this.reloadDuration,0,1);
-      const motion=Math.sin(p*Math.PI);
+      const motion=Math.sin(p*Math.PI)*this.reloadBlend;
       this.weaponGroup.position.x-=motion*.10;
       this.weaponGroup.position.y-=motion*.18;
       this.weaponGroup.position.z+=motion*.12;
@@ -834,11 +889,12 @@ export class ZeroDivisionGame{
     }
     // Sprinting keeps the muzzle up and out of the sight picture.
     const sprintPose=this.dash&&moving&&!this.ads&&!this.reloading;
-    if(sprintPose){
-      this.weaponGroup.position.y-=.16;
-      this.weaponGroup.position.x+=.055;
-      this.weaponGroup.rotateX(.58);
-      this.weaponGroup.rotateZ(-.15);
+    this.sprintBlend=THREE.MathUtils.damp(this.sprintBlend,sprintPose?1:0,11,dt);
+    if(this.sprintBlend>.001){
+      this.weaponGroup.position.y-=.16*this.sprintBlend;
+      this.weaponGroup.position.x+=.055*this.sprintBlend;
+      this.weaponGroup.rotateX(.58*this.sprintBlend);
+      this.weaponGroup.rotateZ(-.15*this.sprintBlend);
     }
     // Subtle translational bob only; never alter weapon roll outside of animations.
     const bob=moving?Math.sin(t*(this.dash?14:10))*(this.dash?.012:.006):0;
@@ -848,7 +904,7 @@ export class ZeroDivisionGame{
     this.weaponKick=THREE.MathUtils.damp(this.weaponKick,0,18,dt);
     const cross=document.getElementById('crosshair');
     if(cross){
-      const hidden=this._adsBlend>.85||this.reloading||this.inspecting;
+      const hidden=(this._adsBlend>.85&&!this.debug)||this.reloading||this.inspecting;
       const speed=Math.hypot(this.velocity.x,this.velocity.z);
       const gap=5+Math.min(23,this.recoilBloom*1150)+(this.ads?0:(speed>.15?4:0))+(this.canJump?0:4);
       cross.style.setProperty('--crosshair-gap',`${gap.toFixed(1)}px`);
@@ -928,9 +984,9 @@ class SimplePointerLock extends EventTarget{
   constructor(camera,domElement){super();this.camera=camera;this.domElement=domElement;this.isLocked=false;this.pointerSpeed=1;this.yaw=0;this.pitch=0;this.recoilYaw=0;this.recoilPitch=0;this._onMove=e=>this._move(e);this._onChange=()=>{const locked=document.pointerLockElement===this.domElement;if(locked!==this.isLocked){this.isLocked=locked;this.dispatchEvent(new Event(locked?'lock':'unlock'));}};document.addEventListener('pointerlockchange',this._onChange)}
   lock(){this.camera.rotation.order='YXZ';this.yaw=this.camera.rotation.y-this.recoilYaw;this.pitch=this.camera.rotation.x-this.recoilPitch;this.camera.rotation.z=0;this.domElement.requestPointerLock?.();if(!this._listening){document.addEventListener('mousemove',this._onMove,false);this._listening=true}}
   unlock(){document.exitPointerLock?.();if(this._listening){document.removeEventListener('mousemove',this._onMove,false);this._listening=false}this.isLocked=false}
-  // Vertical recoil is applied to the player's aim, so sustained fire keeps climbing
-  // until the player compensates with the mouse. Horizontal recoil recentres naturally.
-  addRecoil(pitch,yaw){const lim=Math.PI/2-.08;this.pitch=Math.max(-lim,Math.min(lim,this.pitch-pitch));this.recoilYaw+=yaw;this._applyRotation()}
+  // Positive X camera pitch looks upward in Three.js. Apply it to the player's aim
+  // so sustained fire keeps climbing until the player compensates with the mouse.
+  addRecoil(pitch,yaw){const lim=Math.PI/2-.08;this.pitch=Math.max(-lim,Math.min(lim,this.pitch+pitch));this.recoilYaw+=yaw;this._applyRotation()}
   clearRecoil(){this.recoilYaw=0;this.recoilPitch=0;this._applyRotation()}
   resetView(){this.yaw=0;this.pitch=0;this.recoilYaw=0;this.recoilPitch=0;this._applyRotation()}
   updateRecoil(dt,recovery){this.recoilPitch=THREE.MathUtils.damp(this.recoilPitch,0,recovery,dt);this.recoilYaw=THREE.MathUtils.damp(this.recoilYaw,0,recovery*1.25,dt);this._applyRotation()}

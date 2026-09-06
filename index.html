@@ -126,7 +126,23 @@
       <div class="hud top-right"><span id="hud-state">準備完了</span><small><b id="fps">-- FPS</b> <b id="ping">-- ms</b> <b id="packet-loss">0.0 %</b></small></div>
       <div class="hud bottom-left"><div class="hud-line"><span>姿勢</span><b id="stance">立ち</b></div><div class="hud-line"><span>移動</span><b id="drive">歩行</b></div></div>
       <div class="hud bottom-right"><div class="hud-line"><span>敵ユニット</span><b id="enemy-counter">6</b></div><div class="hud-line"><span>武器</span><b id="weapon-hud">M4A1</b></div><div class="ammo-block"><div class="ammo-count" id="ammo-value">30 / 120</div><div class="ammo-sub" id="fire-mode">連射</div></div><div class="status-meter"><div class="meter-label"><span>HP</span><b><span id="hp-value">100</span> / 100</b></div><div class="meter"><i id="hp-fill"></i></div></div><div class="status-meter"><div class="meter-label"><span>STAMINA</span><b><span id="stamina-value">100</span> / 100</b></div><div class="meter"><i id="stamina-fill"></i></div></div></div>
-      <div id="debug-panel" class="debug-panel hidden"><pre id="debug-lines">ZERO DIVISION // DEBUG</pre></div>
+        <div id="debug-panel" class="debug-panel hidden">
+          <pre id="debug-lines">ZERO DIVISION // DEBUG</pre>
+          <div class="ads-tuner">
+            <b>ADS CALIBRATION</b><small>中央のクロスヘアにアイアンサイトを合わせる</small>
+            <em>POSITION</em>
+            <label>X（左右）<input data-ads-tune="x" type="range" min="-0.300" max="0.300" step="0.001"><output data-ads-value="x">0.019</output></label>
+            <label>Y（上下）<input data-ads-tune="y" type="range" min="-0.300" max="0.300" step="0.001"><output data-ads-value="y">0.003</output></label>
+            <label>Z（前後）<input data-ads-tune="z" type="range" min="-0.300" max="0.300" step="0.001"><output data-ads-value="z">0.000</output></label>
+            <em>ROTATION</em>
+            <label>Pitch（上下角）<input data-ads-tune="pitch" type="range" min="-0.500" max="0.500" step="0.001"><output data-ads-value="pitch">0.000</output></label>
+            <label>Yaw（左右角）<input data-ads-tune="yaw" type="range" min="-0.500" max="0.500" step="0.001"><output data-ads-value="yaw">0.000</output></label>
+            <label>Roll（傾き）<input data-ads-tune="roll" type="range" min="-0.300" max="0.300" step="0.001"><output data-ads-value="roll">-0.045</output></label>
+            <label>Scale（全体）<input data-ads-tune="scale" type="range" min="0.500" max="1.500" step="0.001"><output data-ads-value="scale">1.000</output></label>
+            <label class="ads-check"><input data-ads-tune="level" type="checkbox">銃身を地面と平行にする</label>
+            <div><button id="ads-tune-reset" type="button">初期値に戻す</button><button id="ads-tune-copy" type="button">設定コードをコピー</button><button id="ads-tune-download" type="button">game.js を生成</button></div>
+          </div>
+        </div>
       <div id="pause-card" class="pause-card hidden"><h2>シミュレーション停止</h2><p>クリックで再開</p><button id="exit-to-menu">シミュレーション終了</button></div>
       <div id="hint">クリックでマウス操作 · WASD 移動 · CTRL ダッシュ · SHIFT しゃがみ · Q/E リーン · 右クリック ADS · R リロード · H 装備確認 · 0 デバッグ</div>
     </div>
