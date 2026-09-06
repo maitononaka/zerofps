@@ -84,6 +84,13 @@ canvas{display:block}
 
 .ads-tuner em{display:block;margin:10px 0 3px;color:#7f9498;font-style:normal;font-size:9px;letter-spacing:.16em}.ads-tuner label{grid-template-columns:78px 1fr 46px}.ads-tuner label.ads-check{display:flex;gap:7px;margin:10px 0 0;color:#d9ff5f}.ads-tuner label.ads-check input{width:auto}
 
+.debug-panel{width:min(860px,calc(100vw - 32px));min-width:0;max-width:none;max-height:calc(100vh - 92px);overflow:auto;display:grid;grid-template-columns:minmax(190px,.72fr) minmax(390px,1.28fr);gap:16px;align-items:start}
+.debug-panel pre{min-width:0}
+.ads-tuner{margin-top:0;min-width:0}
+.ads-tuner div{flex-wrap:wrap}
+.ads-tuner button{min-width:112px}
+@media(max-width:700px){.debug-panel{grid-template-columns:1fr;width:calc(100vw - 24px);left:12px;top:60px;max-height:calc(100vh - 72px);gap:10px}.ads-tuner{border-top:1px solid rgba(217,255,95,.32);padding-top:9px}.debug-panel pre{font-size:10px}}
+
 /* In-game ADS calibration panel (open with 0). */
 .debug-panel{pointer-events:auto;min-width:360px;max-width:430px}.ads-tuner{margin-top:10px;padding-top:9px;border-top:1px solid rgba(217,255,95,.32);color:#dce9e8}.ads-tuner>b{display:block;color:#d9ff5f;letter-spacing:.14em;font-size:11px}.ads-tuner small{display:block;color:#8c9da1;margin:3px 0 8px;font-size:10px}.ads-tuner label{display:grid;grid-template-columns:38px 1fr 46px;align-items:center;gap:8px;margin:5px 0;font-size:11px}.ads-tuner input{accent-color:#d9ff5f}.ads-tuner output{text-align:right;color:#d9ff5f}.ads-tuner div{display:flex;gap:6px;margin-top:9px}.ads-tuner button{pointer-events:auto;flex:1;padding:6px 5px;background:#162025;border:1px solid #405057;color:#e6efef;font:10px ui-monospace,SFMono-Regular,Consolas,monospace;cursor:pointer}.ads-tuner button:hover{border-color:#d9ff5f;color:#d9ff5f}
 

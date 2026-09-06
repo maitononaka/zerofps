@@ -6,6 +6,9 @@
   <title>ZERO DIVISION // Field Simulator</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="./styles.css">
+  <script type="importmap">
+    {"imports":{"three":"https://esm.sh/three@0.185.1"}}
+  </script>
 
 </head>
 <body>
@@ -129,17 +132,20 @@
         <div id="debug-panel" class="debug-panel hidden">
           <pre id="debug-lines">ZERO DIVISION // DEBUG</pre>
           <div class="ads-tuner">
-            <b>ADS CALIBRATION</b><small>中央のクロスヘアにアイアンサイトを合わせる</small>
+            <b>VIEWMODEL CALIBRATION</b><small>標準時 / ADS時の武器位置を調整</small>
+            <label>調整対象<select id="ads-tune-mode"><option value="normal">標準時</option><option value="ads" selected>ADS時</option></select></label>
             <em>POSITION</em>
             <label>X（左右）<input data-ads-tune="x" type="range" min="-0.300" max="0.300" step="0.001"><output data-ads-value="x">0.019</output></label>
             <label>Y（上下）<input data-ads-tune="y" type="range" min="-0.300" max="0.300" step="0.001"><output data-ads-value="y">0.003</output></label>
             <label>Z（前後）<input data-ads-tune="z" type="range" min="-0.300" max="0.300" step="0.001"><output data-ads-value="z">0.000</output></label>
             <em>ROTATION</em>
-            <label>Pitch（上下角）<input data-ads-tune="pitch" type="range" min="-0.500" max="0.500" step="0.001"><output data-ads-value="pitch">0.000</output></label>
+            <label>前後傾き<input data-ads-tune="pitch" type="range" min="-1.500" max="1.500" step="0.001"><output data-ads-value="pitch">0.000</output></label>
             <label>Yaw（左右角）<input data-ads-tune="yaw" type="range" min="-0.500" max="0.500" step="0.001"><output data-ads-value="yaw">0.000</output></label>
-            <label>Roll（傾き）<input data-ads-tune="roll" type="range" min="-0.300" max="0.300" step="0.001"><output data-ads-value="roll">-0.045</output></label>
+            <label>左右傾き<input data-ads-tune="roll" type="range" min="-0.300" max="0.300" step="0.001"><output data-ads-value="roll">0.000</output></label>
             <label>Scale（全体）<input data-ads-tune="scale" type="range" min="0.500" max="1.500" step="0.001"><output data-ads-value="scale">1.000</output></label>
             <label class="ads-check"><input data-ads-tune="level" type="checkbox">銃身を地面と平行にする</label>
+            <div class="tilt-buttons"><button id="ads-pitch-forward" type="button">前へ傾ける</button><button id="ads-pitch-back" type="button">後ろへ傾ける</button></div>
+            <div class="cant-buttons"><button id="ads-cant-left" type="button">← 左へ傾ける</button><button id="ads-cant-right" type="button">右へ傾ける →</button></div>
             <div><button id="ads-tune-reset" type="button">初期値に戻す</button><button id="ads-tune-copy" type="button">設定コードをコピー</button><button id="ads-tune-download" type="button">game.js を生成</button></div>
           </div>
         </div>
